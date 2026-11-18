@@ -24,7 +24,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = get_user_model()
-        fields = ["id", "username", "first_name", "last_name", "email", "is_staff"]
+        fields = ["id", "username", "first_name", "last_name", "email", "is_staff", "is_superuser"]
 
 
 class CompanySerializer(serializers.ModelSerializer):

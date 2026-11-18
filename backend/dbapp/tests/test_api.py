@@ -160,3 +160,16 @@ def test_password_reset_flow(data):
         {"uid": uid, "token": token, "new_password": "another-Pass-88"},
     )
     assert res.status_code == 400
+
+
+def test_sync_requires_superuser(client, data, monkeypatch):
+    from dbapp.services import sync
+
+    monkeypatch.setattr(sync, "run_full_sync", lambda: {"base": {}, "summary": {}})
+    assert client.post("/api/sync/").status_code == 403
+
+    data["user"].is_superuser = True
+    data["user"].save()
+    res = client.post("/api/sync/")
+    assert res.status_code == 200
+    assert res.json()["status"] == "ok"

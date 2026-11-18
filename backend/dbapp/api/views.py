@@ -12,7 +12,7 @@ from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -195,7 +195,16 @@ class DashboardView(APIView):
 # ---------------------------------------------------------------- sync
 
 
+class IsSuperUser(BasePermission):
+    """ปุ่มอัปเดตข้อมูลในหน้าเดิมแสดงเฉพาะ superuser"""
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_superuser)
+
+
 class SyncAllView(APIView):
+    permission_classes = [IsSuperUser]
+
     """ปุ่ม "อัปเดตข้อมูล": base + summary ตั้งแต่ต้นปี (เดิม: updateValueAPI)"""
 
     @extend_schema(request=None, responses=s.SyncResultSerializer)
@@ -204,6 +213,8 @@ class SyncAllView(APIView):
 
 
 class SyncSummaryView(APIView):
+    permission_classes = [IsSuperUser]
+
     """summary ย้อนหลัง 3 เดือน (เดิม: update_summary_from_api)"""
 
     @extend_schema(request=None, responses=s.SyncResultSerializer)
@@ -212,6 +223,8 @@ class SyncSummaryView(APIView):
 
 
 class SyncBaseView(APIView):
+    permission_classes = [IsSuperUser]
+
     """ข้อมูลหลัก รถ/ชนิด/แผนก/ประเภทซ่อม (เดิม: update_base_from_api)"""
 
     @extend_schema(request=None, responses=s.SyncResultSerializer)
