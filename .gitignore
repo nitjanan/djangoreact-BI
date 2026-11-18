@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+backend/staticfiles/
+backend/db.sqlite3
+backend/schema.yml
+
+# env
+.env
+!.env.example
+
+# Node (frontend)
+node_modules/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

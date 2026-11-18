@@ -1,0 +1,46 @@
+[project]
+name = "fleet-backend"
+version = "0.1.0"
+description = "Fleet dashboard API (Django REST Framework)"
+requires-python = ">=3.12"
+dependencies = [
+    # Django 4.2 LTS: MariaDB 10.4 (XAMPP) ไม่รองรับ Django 5.x
+    "django>=4.2,<5.0",
+    "django-filter>=24.3",
+    "django-import-export>=4.0,<5",
+    "djangorestframework>=3.15",
+    "drf-spectacular>=0.28",
+    "gunicorn>=27.0.1",
+    "mysqlclient>=2.2",
+    "python-dateutil>=4.0.0",
+    "python-dotenv>=1.2.4",
+    "requests>=2.34.2",
+    "whitenoise>=6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-django>=4.14.0",
+    "ruff>=0.17.5",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings_test"
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["dbapp/migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "DJ"]
+
+[tool.ruff.lint.per-file-ignores]
+# models/forms คัดลอกจากโปรเจกต์เดิม: แก้ null=True ใน CharField ต้องทำ migration (ไว้ทีหลัง)
+"dbapp/models.py" = ["DJ001"]
+"dbapp/forms.py" = ["DJ007"]
