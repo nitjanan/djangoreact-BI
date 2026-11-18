@@ -5,7 +5,49 @@ Dashboard รถ/เครื่องจักร (ค่าซ่อม น้
 
 ```
 backend/    Django 4.2 + DRF  (ใช้ฐานข้อมูล djangodashboarddb ตัวเดิม)
-frontend/   React + TypeScript + Vite + Tailwind + shadcn/ui   (เฟส 2)
+frontend/   React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui
+```
+
+## เริ่มใช้งาน (dev)
+
+เปิด MySQL ใน XAMPP ก่อน แล้วรัน 2 terminal:
+
+```bash
+cd backend && uv run python manage.py runserver 8001
+```
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+เปิด http://localhost:5173 — Vite ส่ง `/api`, `/admin`, `/static` ต่อไปที่ Django (8001)
+จึงอยู่ origin เดียวกัน ใช้ session cookie ได้โดยไม่ต้องตั้ง CORS
+
+## Frontend
+
+| เรื่อง | ใช้ |
+|---|---|
+| UI | Tailwind v4 + shadcn/ui (Radix), ฟอนต์ Geist + Noto Sans Thai |
+| ข้อมูลจาก API | TanStack Query + openapi-fetch (type สร้างจาก schema ของ DRF) |
+| Routing | React Router — ตัวกรอง dashboard เก็บใน URL (`?company=&car_dep=&car_type=&car_id=`) |
+| ฟอร์ม | React Hook Form + Zod |
+| กราฟ | react-apexcharts (ชุดสีเดิมที่ตรวจสำหรับคนตาบอดสีแล้ว) |
+| Excel | SheetJS 0.20.3 จาก cdn.sheetjs.com (เวอร์ชันบน npm เก่าและมีช่องโหว่) |
+
+API เปลี่ยนเมื่อไร ให้สร้าง type ใหม่:
+
+```bash
+cd frontend && npm run gen:api   # backend/schema.yml -> src/api/schema.d.ts
+```
+
+ตรวจโค้ด: `npm run typecheck`, `npm run lint`, `npm run build`
+
+```
+src/api/          client (CSRF อัตโนมัติ), hooks ของ TanStack Query, schema.d.ts (generated)
+src/layout/       RequireAuth, AppLayout (sidebar), CompanySwitcher
+src/pages/auth/   login, ลืมรหัสผ่าน, ตั้งรหัสผ่านใหม่ (/reset-password/:uid/:token)
+src/pages/dashboard/  KPI, ตารางรถ, ความถี่การเสีย (MTBF/MTTR), กราฟ 9 ตัว
+src/lib/          ตัวกรองใน URL, format ตัวเลข, export Excel
 ```
 
 ## Backend
