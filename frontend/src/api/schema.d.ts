@@ -371,6 +371,8 @@ export interface components {
             charts: components["schemas"]["Charts"];
             reliability: components["schemas"]["Reliability"];
             unmatched: components["schemas"]["Unmatched"];
+            open_jobs: components["schemas"]["OpenJobs"];
+            parts: components["schemas"]["Parts"];
             insights: components["schemas"]["Insights"];
         };
         DashboardFilters: {
@@ -434,6 +436,87 @@ export interface components {
             liters: number[];
             liter_per_km: number[];
         };
+        OpenJob: {
+            ext_id: number;
+            ref_no: string;
+            car_id: number | null;
+            branch_company_id: string;
+            branch_company_name: string;
+            code: string;
+            name: string | null;
+            /** Format: date-time */
+            reported_at: string;
+            days: number;
+            immobile: boolean;
+            broke_reason: string;
+            stage: string;
+            stage_label: string;
+            stage_days: number | null;
+            /** Format: date */
+            po_due: string | null;
+            po_overdue: boolean;
+            documents: components["schemas"]["OpenJobDocument"][];
+            parts: components["schemas"]["Part"][];
+            /** Format: double */
+            parts_amount: number;
+        };
+        OpenJobBucket: {
+            label: string;
+            count: number;
+        };
+        OpenJobDocument: {
+            type: components["schemas"]["TypeEnum"];
+            ref_no: string | null;
+        };
+        OpenJobStage: {
+            code: string;
+            label: string;
+            count: number;
+        };
+        OpenJobs: {
+            total: number;
+            car_count: number;
+            immobile_car_count: number;
+            stale_count: number;
+            stale_days: number;
+            has_process: boolean;
+            buckets: components["schemas"]["OpenJobBucket"][];
+            stages: components["schemas"]["OpenJobStage"][];
+            jobs: components["schemas"]["OpenJob"][];
+        };
+        Part: {
+            docnum: string;
+            /** Format: date */
+            docdat: string | null;
+            stkcod: string;
+            name: string;
+            /** Format: double */
+            qty: number;
+            unit: string;
+            /** Format: double */
+            amount: number;
+        };
+        Parts: {
+            job_count: number;
+            jobs_with_parts: number;
+            /** Format: double */
+            amount: number;
+            /** Format: double */
+            amount_per_job: number | null;
+            top: components["schemas"]["TopPart"][];
+            jobs: components["schemas"]["PartsJob"][];
+        };
+        PartsJob: {
+            ext_id: number;
+            ref_no: string;
+            /** Format: date-time */
+            reported_at: string;
+            broke_reason: string;
+            closed: boolean;
+            /** Format: double */
+            amount: number;
+            parts: components["schemas"]["Part"][];
+        };
         PasswordResetConfirmRequest: {
             uid: string;
             token: string;
@@ -494,6 +577,22 @@ export interface components {
             companies: string[];
             count: number[];
         };
+        TopPart: {
+            stkcod: string;
+            name: string;
+            unit: string;
+            /** Format: double */
+            qty: number;
+            /** Format: double */
+            amount: number;
+            jobs: number;
+        };
+        /**
+         * @description * `RQ` - RQ
+         *     * `PO` - PO
+         * @enum {string}
+         */
+        TypeEnum: "RQ" | "PO";
         Unmatched: {
             rows: components["schemas"]["UnmatchedRow"][];
             /** Format: double */

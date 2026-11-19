@@ -366,6 +366,15 @@ class SummaryMaintenance(models.Model):
     car_state = models.CharField(max_length=255, blank=False, null=True)
     is_complete = models.BooleanField(null=True, blank=True)
 
+    # เส้นทางเอกสารจาก webstock (API maintenance/api/process) ดู services/maintenance_stage.py
+    ref_no = models.CharField(max_length=255, null=True, blank=True)  # เลขที่ใบแจ้งซ่อม
+    broke_reason = models.CharField(max_length=255, null=True, blank=True)  # อาการเสีย
+    approve_status = models.CharField(max_length=255, null=True, blank=True)
+    stage = models.CharField(max_length=30, null=True, blank=True)  # null = ปิดงานแล้ว/ไม่มีข้อมูล
+    stage_since = models.DateTimeField(null=True, blank=True)
+    po_due = models.DateField(null=True, blank=True)  # วันกำหนดรับของที่เร็วที่สุดของ PO ที่รออยู่
+    documents = models.JSONField(null=True, blank=True)  # [{"type": "RQ"|"PO", "ref_no": ...}]
+
     branch_company = models.ForeignKey(
         BaseBranchCompany, on_delete=models.CASCADE, null=True, blank=True
     )
@@ -386,3 +395,29 @@ class SummaryMaintenance(models.Model):
 
     def __str__(self):
         return f"{self.ext_id}:{self.car}"
+
+
+class SummaryMaintenancePart(models.Model):
+    """อะไหล่ที่ใช้ในใบแจ้งซ่อม: ใบจ่ายสินค้าภายใน-อะไหล่ (Express, note3 = เลขที่ใบแจ้งซ่อม)
+
+    ไม่เก็บรายการในใบสั่งซื้อ: ของที่ซื้อมาต้องรับเข้าคลังและออกใบจ่ายสินค้าภายในทุกครั้ง
+    ถ้านับ PO ด้วยจะได้อะไหล่ชิ้นเดียวกันซ้ำสองครั้ง
+
+    ผูกกับ SummaryMaintenance ด้วย ext_id เพราะ sync ลบ/สร้างใบแจ้งซ่อมใหม่ทุกรอบ
+    """
+
+    ext_id = models.BigIntegerField(db_index=True)  # SummaryMaintenance.ext_id
+    docnum = models.CharField(max_length=30)
+    docdat = models.DateField(null=True, blank=True)
+    stkcod = models.CharField(max_length=40)
+    name = models.CharField(max_length=255, blank=True, default="")
+    stktyp = models.CharField(max_length=50, blank=True, default="")
+    qty = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    unit = models.CharField(max_length=50, blank=True, default="")
+    amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "sum_maintenance_part"
+
+    def __str__(self):
+        return f"{self.ext_id}:{self.stkcod}"

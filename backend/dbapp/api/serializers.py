@@ -224,6 +224,94 @@ class UnmatchedSerializer(serializers.Serializer):
     oil_total = serializers.FloatField()
 
 
+class OpenJobBucketSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class OpenJobStageSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    label = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class OpenJobDocumentSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=["RQ", "PO"])
+    ref_no = serializers.CharField(allow_blank=True, allow_null=True)
+
+
+class PartSerializer(serializers.Serializer):
+    docnum = serializers.CharField()
+    docdat = serializers.DateField(allow_null=True)
+    stkcod = serializers.CharField()
+    name = serializers.CharField(allow_blank=True)
+    qty = serializers.FloatField()
+    unit = serializers.CharField(allow_blank=True)
+    amount = serializers.FloatField()
+
+
+class OpenJobSerializer(serializers.Serializer):
+    ext_id = serializers.IntegerField()
+    ref_no = serializers.CharField(allow_blank=True)
+    car_id = serializers.IntegerField(allow_null=True)
+    branch_company_id = serializers.CharField(allow_blank=True)
+    branch_company_name = serializers.CharField(allow_blank=True)
+    code = serializers.CharField(allow_blank=True)
+    name = serializers.CharField(allow_null=True)
+    reported_at = serializers.DateTimeField()
+    days = serializers.IntegerField()
+    immobile = serializers.BooleanField()
+    broke_reason = serializers.CharField(allow_blank=True)
+    stage = serializers.CharField()
+    stage_label = serializers.CharField()
+    stage_days = serializers.IntegerField(allow_null=True)
+    po_due = serializers.DateField(allow_null=True)
+    po_overdue = serializers.BooleanField()
+    documents = OpenJobDocumentSerializer(many=True)
+    parts = PartSerializer(many=True)
+    parts_amount = serializers.FloatField()
+
+
+class OpenJobsSerializer(serializers.Serializer):
+    total = serializers.IntegerField()
+    car_count = serializers.IntegerField()
+    immobile_car_count = serializers.IntegerField()
+    stale_count = serializers.IntegerField()
+    stale_days = serializers.IntegerField()
+    has_process = serializers.BooleanField()
+    buckets = OpenJobBucketSerializer(many=True)
+    stages = OpenJobStageSerializer(many=True)
+    jobs = OpenJobSerializer(many=True)
+
+
+class TopPartSerializer(serializers.Serializer):
+    stkcod = serializers.CharField()
+    name = serializers.CharField(allow_blank=True)
+    unit = serializers.CharField(allow_blank=True)
+    qty = serializers.FloatField()
+    amount = serializers.FloatField()
+    jobs = serializers.IntegerField()
+
+
+class PartsJobSerializer(serializers.Serializer):
+    ext_id = serializers.IntegerField()
+    ref_no = serializers.CharField(allow_blank=True)
+    reported_at = serializers.DateTimeField()
+    broke_reason = serializers.CharField(allow_blank=True)
+    closed = serializers.BooleanField()
+    amount = serializers.FloatField()
+    parts = PartSerializer(many=True)
+
+
+class PartsSerializer(serializers.Serializer):
+    job_count = serializers.IntegerField()
+    jobs_with_parts = serializers.IntegerField()
+    amount = serializers.FloatField()
+    amount_per_job = serializers.FloatField(allow_null=True)
+    top = TopPartSerializer(many=True)
+    jobs = PartsJobSerializer(many=True)
+
+
 class InsightTargetSerializer(serializers.Serializer):
     car_id = serializers.IntegerField()
     branch_company_id = serializers.CharField()
@@ -251,6 +339,8 @@ class DashboardSerializer(serializers.Serializer):
     charts = ChartsSerializer()
     reliability = ReliabilitySerializer()
     unmatched = UnmatchedSerializer()
+    open_jobs = OpenJobsSerializer()
+    parts = PartsSerializer()
     insights = InsightsSerializer()
 
 

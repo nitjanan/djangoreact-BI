@@ -395,7 +395,11 @@ def merge_unmatched_months(by_month, year, company_ids, car_type):
     return [totals[m] for m in sorted(totals)]
 
 
-def build_dashboard(user, filters: DashboardFilters, today=None):
+def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
+    # import ที่นี่ เพราะ open_jobs ใช้ to_gregorian จากไฟล์นี้
+    from dbapp.services.open_jobs import build_open_jobs
+    from dbapp.services.parts import build_parts
+
     today = today or date.today()
     company_ids = resolve_company_ids(user, filters.company)
     is_other = filters.car_dep == OTHER_CAR_DEP
@@ -603,6 +607,11 @@ def build_dashboard(user, filters: DashboardFilters, today=None):
         },
         "reliability": build_reliability(base_filter, months),
         "unmatched": unmatched,
+        "parts": build_parts(base_filter, with_jobs=selected_car is not None),
+        # สถานะ ณ ตอนนี้ ไม่กรองปี
+        "open_jobs": build_open_jobs(
+            {k: v for k, v in base_filter.items() if k != "year"}, now=now
+        ),
     }
     result["insights"] = build_insights(
         result,

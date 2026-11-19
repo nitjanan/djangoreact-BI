@@ -20,6 +20,7 @@ from dbapp.models import (
     BaseRepairType,
     SummaryCarDep,
     SummaryMaintenance,
+    SummaryMaintenancePart,
     SummaryOil,
     SummaryRepair,
     SummaryUnmatched,
@@ -27,6 +28,7 @@ from dbapp.models import (
 )
 
 from .external_api import get_api_data, get_base_url
+from .maintenance_stage import job_stage
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +224,14 @@ def sync_maintenance(today=None):
     if not data:
         return False
 
+    # เส้นทางเอกสาร (ใบขอเบิก/PR/PO) — webstock รุ่นเก่ายังไม่มี API นี้ ได้ [] ก็ยัง sync ส่วนอื่นต่อได้
+    process = {
+        str(p["id"]): p
+        for p in get_api_data(
+            f"{base_url}/all/maintenance/api/process/{start_date}/{today}/", base_url
+        )
+    }
+
     _delete_range(SummaryMaintenance, start_date, today)
 
     # กัน FK error กรณี base ยังไม่ได้อัปเดต
@@ -247,6 +257,7 @@ def sync_maintenance(today=None):
                 ma_type=item["ma_type"],
                 car_state=item["car_state"],
                 is_complete=item["is_complete"],
+                **_process_fields(process.get(str(item["id"])), reported_at, item),
                 car_id=item["car_id"] if item["car_id"] in car_ids else None,
                 car_dep_id=item["car_dep"] if item["car_dep"] in car_dep_ids else None,
                 branch_company_id=(
@@ -256,7 +267,56 @@ def sync_maintenance(today=None):
         )
 
     SummaryMaintenance.objects.bulk_create(objs, batch_size=1000)
+    _sync_parts(process.values())
     return True
+
+
+def _sync_parts(processes):
+    """อะไหล่ของใบแจ้งซ่อม = ใบจ่ายสินค้าภายใน (Express) เท่านั้น ไม่นับ parts.purchased (PO)
+    เพราะของที่ซื้อมารับเข้าคลังแล้วออกใบจ่ายทุกครั้ง นับ PO ด้วยจะซ้ำ
+
+    แทนที่เฉพาะเมื่อ webstock ต่อ Express ได้ (issued = None แปลว่าไม่รู้ เก็บของเดิมไว้)
+    """
+    issued = [
+        p
+        for p in processes
+        if isinstance(p.get("parts"), dict) and p["parts"].get("issued") is not None
+    ]
+    if not issued:
+        return
+
+    Part = SummaryMaintenancePart
+    Part.objects.filter(ext_id__in=[p["id"] for p in issued]).delete()
+
+    def rows(process):
+        for part in process["parts"]["issued"]:
+            yield Part(
+                ext_id=process["id"],
+                docnum=part["docnum"][:30],
+                docdat=part["docdat"],
+                stkcod=(part["stkcod"] or "")[:40],
+                name=(part["name"] or "")[:255],
+                stktyp=part["stktyp"] or "",
+                qty=part["qty"] or 0,
+                unit=part["unit"] or "",
+                amount=part["amount"] or 0,
+            )
+
+    Part.objects.bulk_create([obj for p in issued for obj in rows(p)], batch_size=1000)
+
+
+def _process_fields(process, reported_at, item):
+    if process is None:
+        return {}
+    fields = {
+        "ref_no": process["ref_no"],
+        "broke_reason": (process["broke_reason"] or "")[:255] or None,
+        "approve_status": process["approve_status"],
+    }
+    # คำนวณขั้นเฉพาะใบที่ยังไม่ปิด (ปิดงานแล้วไม่ต้องรู้ว่าค้างที่ไหน)
+    if not item["chief_update"] and not item["is_complete"]:
+        fields.update(job_stage(process, reported_at))
+    return fields
 
 
 def _safe_step(name, func, *args):

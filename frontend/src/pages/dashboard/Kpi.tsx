@@ -25,6 +25,7 @@ export function Kpi({
   unit,
   meter,
   note,
+  alert = false,
 }: {
   label: string
   value: string
@@ -32,11 +33,25 @@ export function Kpi({
   /** แถบ 0–100 */
   meter?: number | null
   note?: string
+  /** ช่องสีแดง: ตัวเลขที่ต้องรีบจัดการ */
+  alert?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-1.5 bg-card px-4 py-3.5">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="font-heading text-2xl leading-none font-semibold tracking-tight tabular-nums">
+    <div
+      className={cn(
+        'flex flex-col gap-1.5 bg-card px-4 py-3.5',
+        alert && 'bg-[color-mix(in_oklab,var(--destructive)_9%,var(--card))]',
+      )}
+    >
+      <span className={cn('text-sm text-muted-foreground', alert && 'text-destructive')}>
+        {label}
+      </span>
+      <span
+        className={cn(
+          'font-heading text-2xl leading-none font-semibold tracking-tight tabular-nums',
+          alert && 'text-destructive',
+        )}
+      >
         {value}
         {unit && (
           <small className="ml-1 font-sans text-xs font-normal text-muted-foreground">{unit}</small>

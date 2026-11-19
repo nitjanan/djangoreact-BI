@@ -105,6 +105,7 @@ def test_dashboard_all_companies_only_includes_visible_ones(client):
     assert body["car_types"] == [{"id": 1, "name": "รถบรรทุก"}]
     assert body["reliability"]["failure_count"] == 1
     assert body["reliability"]["mttr"] == 4
+    assert body["open_jobs"]["total"] == 0
 
 
 def test_dashboard_single_company(client):

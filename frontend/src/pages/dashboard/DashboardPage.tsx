@@ -23,6 +23,8 @@ import { ExportFiltersContext } from './export-context'
 import { HeroPanel } from './HeroPanel'
 import { Insights } from './Insights'
 import { Kpi, KpiStrip } from './Kpi'
+import { OpenJobs } from './OpenJobs'
+import { PartsSummary } from './Parts'
 import { Reliability } from './Reliability'
 import { Section } from './Section'
 import { UnmatchedTable } from './UnmatchedTable'
@@ -143,6 +145,13 @@ export default function DashboardPage() {
             {data.unmatched.rows.length > 0 && <UnmatchedTable data={data.unmatched} />}
 
             <Section
+              title="ใบแจ้งซ่อมที่ยังไม่ปิดงาน"
+              description="สถานะ ณ ตอนนี้ ไม่ขึ้นกับปีที่เลือก · นับใบที่หัวหน้าช่างยังไม่ปิดงานใน webstock"
+            >
+              <OpenJobs data={data.open_jobs} onSelectCar={params.selectCar} />
+            </Section>
+
+            <Section
               title="รายการรถ"
               description={
                 isOther
@@ -164,6 +173,17 @@ export default function DashboardPage() {
 
             <Section title="การเสียและเวลาซ่อม" description="นับจากใบแจ้งซ่อมประเภทซ่อม">
               <Reliability data={data.reliability} />
+            </Section>
+
+            <Section
+              title="อะไหล่ที่ใช้ในการซ่อม"
+              description={
+                selectedCar
+                  ? 'อะไหล่ที่จ่ายให้ใบแจ้งซ่อมของรถคันนี้ในปีที่เลือก'
+                  : 'จากใบจ่ายสินค้าภายใน-อะไหล่ ที่อ้างอิงเลขที่ใบแจ้งซ่อม'
+              }
+            >
+              <PartsSummary data={data.parts} carSelected={Boolean(selectedCar)} />
             </Section>
 
             <Section title="ค่าใช้จ่ายซ่อมบำรุง">
