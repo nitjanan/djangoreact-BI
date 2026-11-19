@@ -168,7 +168,8 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 
 # --- External API (webstock) ---
 # ใบแจ้งซ่อมยังทดสอบกับ webstock บนเครื่อง local: เว้นว่างเพื่อใช้ BaseAPI ในฐานข้อมูล
-MAINTENANCE_API_BASE = os.environ.get("MAINTENANCE_API_BASE", "http://127.0.0.1:8000") or None
+# ว่าง = ใช้ base url เดียวกับ API อื่น (ระบบเดิม hard-code 127.0.0.1:8000 ไว้ตอนพัฒนา)
+MAINTENANCE_API_BASE = os.environ.get("MAINTENANCE_API_BASE", "") or None
 
 # dev: เสิร์ฟ static จาก app โดยไม่ต้อง collectstatic
 WHITENOISE_USE_FINDERS = DEBUG

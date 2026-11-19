@@ -163,14 +163,30 @@ class RepairVsWorkChartSerializer(serializers.Serializer):
     work = _floats()
 
 
+class CarSeriesChartSerializer(SeriesTotalChartSerializer):
+    companies = _labels()
+
+
+class HeatmapRowSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    company = serializers.CharField()
+    data = _floats()
+
+
+class HeatmapChartSerializer(serializers.Serializer):
+    labels = _labels()
+    rows = HeatmapRowSerializer(many=True)
+
+
 class ChartsSerializer(serializers.Serializer):
     repair_by_type = SeriesTotalChartSerializer()
     repair_by_car_type = SeriesTotalChartSerializer()
     repair_by_month = SeriesChartSerializer()
-    repair_by_car = SeriesTotalChartSerializer()
+    repair_by_car = CarSeriesChartSerializer()
     oil_by_month = OilChartSerializer()
     work_by_month = WorkChartSerializer()
     repair_vs_work = RepairVsWorkChartSerializer()
+    repair_heatmap = HeatmapChartSerializer()
 
 
 class ReliabilityTrendSerializer(serializers.Serializer):
@@ -181,6 +197,7 @@ class ReliabilityTrendSerializer(serializers.Serializer):
 
 class TopCarsSerializer(serializers.Serializer):
     labels = _labels()
+    companies = _labels()
     count = serializers.ListField(child=serializers.IntegerField())
 
 
@@ -194,6 +211,38 @@ class ReliabilitySerializer(serializers.Serializer):
     top_cars = TopCarsSerializer()
 
 
+class UnmatchedRowSerializer(serializers.Serializer):
+    remark = serializers.CharField()
+    branch_company_name = serializers.CharField()
+    repair_amount = serializers.FloatField()
+    oil_qty = serializers.FloatField()
+
+
+class UnmatchedSerializer(serializers.Serializer):
+    rows = UnmatchedRowSerializer(many=True)
+    repair_total = serializers.FloatField()
+    oil_total = serializers.FloatField()
+
+
+class InsightTargetSerializer(serializers.Serializer):
+    car_id = serializers.IntegerField()
+    branch_company_id = serializers.CharField()
+
+
+class InsightItemSerializer(serializers.Serializer):
+    severity = serializers.ChoiceField(choices=["high", "medium", "good", "info"])
+    kind = serializers.ChoiceField(choices=["urgent", "anomaly", "efficiency", "trend", "data"])
+    title = serializers.CharField()
+    detail = serializers.CharField()
+    target = InsightTargetSerializer(allow_null=True)
+    action = serializers.CharField(allow_null=True)
+
+
+class InsightsSerializer(serializers.Serializer):
+    overview = serializers.ListField(child=serializers.CharField())
+    items = InsightItemSerializer(many=True)
+
+
 class DashboardSerializer(serializers.Serializer):
     filters = DashboardFiltersSerializer()
     car_types = CarTypeSerializer(many=True)
@@ -201,6 +250,8 @@ class DashboardSerializer(serializers.Serializer):
     car_table = CarTableSerializer()
     charts = ChartsSerializer()
     reliability = ReliabilitySerializer()
+    unmatched = UnmatchedSerializer()
+    insights = InsightsSerializer()
 
 
 # ------------------------------------------------------------------ sync

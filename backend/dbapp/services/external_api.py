@@ -17,13 +17,14 @@ def get_base_api():
 
 
 def get_base_url():
-    return get_base_api().url
+    # ตัด / ท้าย URL ที่กรอกใน Admin ทิ้ง ไม่งั้นต่อ path แล้วได้ "//jwt/create/" (404)
+    return get_base_api().url.rstrip("/")
 
 
 def get_jwt_token(base_url=None):
     api = get_base_api()
     res = requests.post(
-        f"{base_url or api.url}/jwt/create/",
+        f"{(base_url or api.url).rstrip('/')}/jwt/create/",
         json={"username": api.username, "password": api.password},
         timeout=TIMEOUT,
     )
@@ -34,7 +35,7 @@ def get_jwt_token(base_url=None):
 
 def refresh_token(refresh, base_url=None):
     res = requests.post(
-        f"{base_url or get_base_url()}/jwt/refresh/",
+        f"{(base_url or get_base_url()).rstrip('/')}/jwt/refresh/",
         json={"refresh": refresh},
         timeout=TIMEOUT,
     )

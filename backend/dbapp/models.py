@@ -220,7 +220,8 @@ class SummaryRepair(models.Model):
     month = models.IntegerField()
     month_th = models.CharField(max_length=20, blank=False, null=True)
 
-    repair_id = models.CharField(max_length=10, blank=False, null=True)
+    # note2 จาก webstock เป็นข้อความอิสระ ยาวได้ถึง ~50 ตัวอักษร (เดิม 10 ทำให้บันทึกไม่ได้ใน strict mode)
+    repair_id = models.CharField(max_length=255, blank=False, null=True)
     repair_name = models.CharField(max_length=255, blank=False, null=True)
 
     amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
@@ -246,6 +247,37 @@ class SummaryRepair(models.Model):
 
     def __str__(self):
         return f"{self.year}-{self.month}:{self.car}"
+
+
+class SummaryUnmatched(models.Model):
+    """ค่าซ่อม/น้ำมันที่ remark ใน webstock จับคู่กับ BaseCar ไม่ได้ (ยังไม่ได้ตั้งค่ารถ)
+
+    ไม่มีรถและแผนก จึงไม่รวมในตัวเลขรายคัน แสดงแยกเพื่อให้รู้ว่าต้องไปตั้งค่าอะไรเพิ่ม
+    """
+
+    summary_date = models.DateField(db_index=True, null=True, blank=True)
+    year = models.IntegerField()
+    month = models.IntegerField()
+    month_th = models.CharField(max_length=20, blank=False, null=True)
+
+    branch_company = models.ForeignKey(
+        BaseBranchCompany, on_delete=models.CASCADE, null=True, blank=True
+    )
+    remark = models.CharField(max_length=255)
+    repair_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    oil_qty = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+
+    v_stamp = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "sum_unmatched"
+        indexes = [
+            models.Index(fields=["year", "branch_company"], name="unmatched_year_branch_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.year}-{self.month}:{self.remark}"
 
 
 class SummaryOil(models.Model):

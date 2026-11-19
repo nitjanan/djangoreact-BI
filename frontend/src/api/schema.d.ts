@@ -307,6 +307,13 @@ export interface components {
             /** Format: double */
             mttr: number | null;
         };
+        CarSeriesChart: {
+            labels: string[];
+            series: number[];
+            /** Format: double */
+            total: number;
+            companies: string[];
+        };
         CarTable: {
             rows: components["schemas"]["CarRow"][];
             totals: components["schemas"]["CarTotals"];
@@ -341,10 +348,11 @@ export interface components {
             repair_by_type: components["schemas"]["SeriesTotalChart"];
             repair_by_car_type: components["schemas"]["SeriesTotalChart"];
             repair_by_month: components["schemas"]["SeriesChart"];
-            repair_by_car: components["schemas"]["SeriesTotalChart"];
+            repair_by_car: components["schemas"]["CarSeriesChart"];
             oil_by_month: components["schemas"]["OilChart"];
             work_by_month: components["schemas"]["WorkChart"];
             repair_vs_work: components["schemas"]["RepairVsWorkChart"];
+            repair_heatmap: components["schemas"]["HeatmapChart"];
         };
         Company: {
             /** รหัสสาขาบริษัท */
@@ -362,6 +370,8 @@ export interface components {
             car_table: components["schemas"]["CarTable"];
             charts: components["schemas"]["Charts"];
             reliability: components["schemas"]["Reliability"];
+            unmatched: components["schemas"]["Unmatched"];
+            insights: components["schemas"]["Insights"];
         };
         DashboardFilters: {
             company: string;
@@ -374,6 +384,40 @@ export interface components {
         Detail: {
             detail: string;
         };
+        HeatmapChart: {
+            labels: string[];
+            rows: components["schemas"]["HeatmapRow"][];
+        };
+        HeatmapRow: {
+            name: string;
+            company: string;
+            data: number[];
+        };
+        InsightItem: {
+            severity: components["schemas"]["SeverityEnum"];
+            kind: components["schemas"]["KindEnum"];
+            title: string;
+            detail: string;
+            target: components["schemas"]["InsightTarget"] | null;
+            action: string | null;
+        };
+        InsightTarget: {
+            car_id: number;
+            branch_company_id: string;
+        };
+        Insights: {
+            overview: string[];
+            items: components["schemas"]["InsightItem"][];
+        };
+        /**
+         * @description * `urgent` - urgent
+         *     * `anomaly` - anomaly
+         *     * `efficiency` - efficiency
+         *     * `trend` - trend
+         *     * `data` - data
+         * @enum {string}
+         */
+        KindEnum: "urgent" | "anomaly" | "efficiency" | "trend" | "data";
         LoginRequest: {
             username: string;
             password: string;
@@ -431,6 +475,14 @@ export interface components {
             /** Format: double */
             total: number;
         };
+        /**
+         * @description * `high` - high
+         *     * `medium` - medium
+         *     * `good` - good
+         *     * `info` - info
+         * @enum {string}
+         */
+        SeverityEnum: "high" | "medium" | "good" | "info";
         SyncResult: {
             status: string;
             result: {
@@ -439,7 +491,23 @@ export interface components {
         };
         TopCars: {
             labels: string[];
+            companies: string[];
             count: number[];
+        };
+        Unmatched: {
+            rows: components["schemas"]["UnmatchedRow"][];
+            /** Format: double */
+            repair_total: number;
+            /** Format: double */
+            oil_total: number;
+        };
+        UnmatchedRow: {
+            remark: string;
+            branch_company_name: string;
+            /** Format: double */
+            repair_amount: number;
+            /** Format: double */
+            oil_qty: number;
         };
         User: {
             readonly id: number;

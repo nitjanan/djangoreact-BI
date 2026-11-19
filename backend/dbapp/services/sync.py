@@ -22,6 +22,7 @@ from dbapp.models import (
     SummaryMaintenance,
     SummaryOil,
     SummaryRepair,
+    SummaryUnmatched,
     SummaryWork,
 )
 
@@ -118,6 +119,33 @@ def sync_repair(start_date, end_date):
                 car_code=item["car_code"],
                 repair_id=item["note2"],
                 car_dep_id=item["car_dep"],
+            )
+            for item in data
+        ],
+        batch_size=1000,
+    )
+    return True
+
+
+@transaction.atomic
+def sync_unmatched(start_date, end_date):
+    """ค่าซ่อม/น้ำมันที่ webstock จับคู่กับ BaseCar ไม่ได้ (แสดงแยกในหน้า dashboard)"""
+    data = get_api_data(f"{get_base_url()}/all/exp/unmatched/api/between/{start_date}/{end_date}/")
+    if not data:
+        return False
+
+    _delete_range(SummaryUnmatched, start_date, end_date)
+    SummaryUnmatched.objects.bulk_create(
+        [
+            SummaryUnmatched(
+                branch_company_id=item["branch_company"],
+                summary_date=_month_start(item),
+                month=int(item["month"]),
+                year=int(item["year"]),
+                month_th=item["month_th"],
+                remark=(item["remark"] or "")[:255],
+                repair_amount=item["repair_amount"],
+                oil_qty=item["oil_qty"],
             )
             for item in data
         ],
@@ -231,13 +259,23 @@ def sync_maintenance(today=None):
     return True
 
 
+def _safe_step(name, func, *args):
+    """รันทีละขั้น: ขั้นไหนพังให้ rollback เฉพาะขั้นนั้น (แต่ละขั้นเป็น atomic) แล้วทำขั้นถัดไปต่อ"""
+    try:
+        return func(*args)
+    except Exception:
+        logger.exception("sync step %s failed", name)
+        return False
+
+
 def sync_summary(start_date, end_date):
     return {
-        "car_dep": sync_car_dep(start_date, end_date),
-        "repair": sync_repair(start_date, end_date),
-        "oil": sync_oil(start_date, end_date),
-        "work": sync_work(start_date, end_date),
-        "maintenance": sync_maintenance(),
+        "car_dep": _safe_step("car_dep", sync_car_dep, start_date, end_date),
+        "repair": _safe_step("repair", sync_repair, start_date, end_date),
+        "oil": _safe_step("oil", sync_oil, start_date, end_date),
+        "work": _safe_step("work", sync_work, start_date, end_date),
+        "maintenance": _safe_step("maintenance", sync_maintenance),
+        "unmatched": _safe_step("unmatched", sync_unmatched, start_date, end_date),
     }
 
 

@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
 
-import { CompanySwitcher } from './CompanySwitcher'
+import { CompanyTabs } from './CompanyTabs'
 import { useCurrentUser } from './RequireAuth'
 
 // เมนูตามแท็บที่ admin เปิดให้ผู้ใช้เห็น (BaseVisible) — เพิ่มหน้าใหม่ที่นี่
@@ -51,10 +51,15 @@ export function AppLayout() {
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild>
                 <Link to="/">
-                  <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                  <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-signal text-signal-foreground">
                     <Truck className="size-4" />
                   </span>
-                  <span className="font-semibold">Fleet Dashboard</span>
+                  <span className="grid leading-tight">
+                    <span className="font-heading text-base font-semibold text-white">
+                      Fleet Dashboard
+                    </span>
+                    <span className="text-xs text-plate-muted">งานซ่อมบำรุงรถและเครื่องจักร</span>
+                  </span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -63,7 +68,7 @@ export function AppLayout() {
 
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel>Home</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-plate-muted">เมนู</SidebarGroupLabel>
             <SidebarMenu>
               {menu.map((item) => (
                 <SidebarMenuItem key={item.to}>
@@ -71,6 +76,7 @@ export function AppLayout() {
                     asChild
                     isActive={location.pathname === item.to}
                     tooltip={item.label}
+                    className="relative data-[active=true]:bg-sidebar-accent data-[active=true]:font-medium data-[active=true]:text-white data-[active=true]:before:absolute data-[active=true]:before:inset-y-1.5 data-[active=true]:before:left-0 data-[active=true]:before:w-1 data-[active=true]:before:rounded-full data-[active=true]:before:bg-signal"
                   >
                     <Link to={{ pathname: item.to, search: location.search }}>
                       <item.icon />
@@ -89,14 +95,14 @@ export function AppLayout() {
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SidebarMenuButton size="lg">
-                    <Avatar className="size-8 rounded-lg">
-                      <AvatarFallback className="rounded-lg">
+                    <Avatar className="size-8 rounded-md">
+                      <AvatarFallback className="rounded-md bg-sidebar-accent font-heading text-white">
                         {displayName.slice(0, 1).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <span className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-medium">{displayName}</span>
-                      <span className="truncate text-xs text-muted-foreground">
+                      <span className="truncate font-medium text-white">{displayName}</span>
+                      <span className="truncate text-xs text-plate-muted">
                         {me.user.email || me.user.username}
                       </span>
                     </span>
@@ -124,10 +130,10 @@ export function AppLayout() {
       </Sidebar>
 
       <SidebarInset className="min-w-0">
-        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-1 data-[orientation=vertical]:h-5" />
-          <CompanySwitcher />
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b bg-card/95 px-4 backdrop-blur md:px-6">
+          <SidebarTrigger className="-ml-1.5" aria-label="เปิด/ปิดเมนู" />
+          <Separator orientation="vertical" className="data-[orientation=vertical]:h-5" />
+          <CompanyTabs />
         </header>
         <Outlet />
       </SidebarInset>

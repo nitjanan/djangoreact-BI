@@ -7,12 +7,14 @@
 - คืนค่าเป็น list/number ล้วน (เดิมบางค่าเป็น json.dumps สำหรับ template)
 """
 
+import operator
 from dataclasses import dataclass
 from datetime import date
+from functools import reduce
 
-from django.db.models import Case, F, FloatField, Sum, Value, When
+from django.db.models import Case, F, FloatField, Q, Sum, Value, When
 from django.db.models.expressions import ExpressionWrapper
-from django.db.models.functions import Coalesce, Concat
+from django.db.models.functions import Coalesce
 
 from dbapp.models import (
     BaseBranchCompany,
@@ -20,9 +22,11 @@ from dbapp.models import (
     SummaryMaintenance,
     SummaryOil,
     SummaryRepair,
+    SummaryUnmatched,
     SummaryWork,
     UserProfile,
 )
+from dbapp.services.insights import build_insights
 
 ALL_COMPANIES = "ALL"
 
@@ -42,6 +46,9 @@ class CompanyAccessDenied(Exception):
 
 
 # ------------------------------------------------------------------ access
+
+
+HEATMAP_CARS = 15
 
 
 def user_companies(user):
@@ -68,11 +75,28 @@ def resolve_company_ids(user, company_code):
 # ------------------------------------------------------------- calculations
 
 
+BUDDHIST_ERA_OFFSET = 543
+MAX_REPAIR_HOURS = 365 * 24
+
+
+def to_gregorian(dt):
+    """วันที่ที่กรอกเป็น พ.ศ. (เช่น 2569) -> ค.ศ. (2026)"""
+    if dt and dt.year >= 2400:
+        try:
+            return dt.replace(year=dt.year - BUDDHIST_ERA_OFFSET)
+        except ValueError:  # 29 ก.พ. ในปีที่ไม่ใช่ปีอธิกสุรทิน
+            return dt.replace(year=dt.year - BUDDHIST_ERA_OFFSET, day=28)
+    return dt
+
+
 def repair_hours(reported_at, finished_at):
-    # เวลาซ่อม (ชม.) = ปิดงาน - แจ้งซ่อม, ไม่นับใบที่ยังไม่ปิดหรือเวลาผิด
+    # เวลาซ่อม (ชม.) = ปิดงาน - แจ้งซ่อม
+    # ไม่นับใบที่ยังไม่ปิด เวลาปิดก่อนแจ้ง หรือนานเกิน 1 ปี (กรอกวันที่ผิด)
+    reported_at, finished_at = to_gregorian(reported_at), to_gregorian(finished_at)
     if not finished_at or finished_at <= reported_at:
         return None
-    return (finished_at - reported_at).total_seconds() / 3600
+    hours = (finished_at - reported_at).total_seconds() / 3600
+    return hours if hours <= MAX_REPAIR_HOURS else None
 
 
 def cal_mtbf(work_total, failure_count):
@@ -99,6 +123,11 @@ def _label(value):
     return value if value else UNKNOWN
 
 
+def car_label(row):
+    """ชื่อรถ:รหัส (ตัด ':' ท้ายกรณีไม่มีรหัส)"""
+    return f"{row['car__name'] or UNKNOWN}:{row['car__code'] or ''}".rstrip(":")
+
+
 def build_reliability(base_filter, months):
     failures = list(
         SummaryMaintenance.objects.filter(**base_filter, ma_type=MA_TYPE_BREAKDOWN).values(
@@ -106,6 +135,7 @@ def build_reliability(base_filter, months):
             "car__code",
             "car__name",
             "branch_company_id",
+            "branch_company__name",
             "month",
             "reported_at",
             "finished_at",
@@ -130,7 +160,8 @@ def build_reliability(base_filter, months):
         car = cars.setdefault(
             (f["car_id"], f["branch_company_id"]),
             {
-                "label": f"{f['car__name'] or UNKNOWN}:{f['car__code'] or ''}".rstrip(":"),
+                "label": car_label(f),
+                "company": f["branch_company__name"] or "",
                 "count": 0,
                 "durations": [],
             },
@@ -168,6 +199,7 @@ def build_reliability(base_filter, months):
         },
         "top_cars": {
             "labels": [c["label"] for c in top_cars],
+            "companies": [c["company"] for c in top_cars],
             "count": [c["count"] for c in top_cars],
         },
     }
@@ -313,20 +345,73 @@ def available_car_types(car_dep_id, year, company_ids):
     return BaseCarType.objects.filter(id__in=ids)
 
 
+# แท็บ "อื่นๆ": ข้อมูลที่ไม่มีแผนก = รถที่ยังไม่ได้ตั้งแผนกใน webstock + remark ที่จับคู่กับรถไม่ได้
+OTHER_CAR_DEP = 0
+
+
+def build_unmatched(year, company_ids):
+    """ค่าใช้จ่ายที่ remark จับคู่กับรถใน webstock ไม่ได้ รวมทั้งปีต่อ remark + บริษัท
+
+    ไม่มีแผนก จึงไม่กรองตามแท็บแผนก/ประเภทรถ/คันที่เลือก
+    """
+    rows = list(
+        SummaryUnmatched.objects.filter(year=year, branch_company_id__in=company_ids)
+        .values("remark", "branch_company_id", "branch_company__name")
+        .annotate(repair_amount=Sum("repair_amount"), oil_qty=Sum("oil_qty"))
+        .order_by("-repair_amount", "-oil_qty", "remark")
+    )
+    items = [
+        {
+            "remark": r["remark"],
+            "branch_company_name": r["branch_company__name"] or "",
+            "repair_amount": float(r["repair_amount"] or 0),
+            "oil_qty": float(r["oil_qty"] or 0),
+        }
+        for r in rows
+    ]
+    return {
+        "rows": items,
+        "repair_total": sum(i["repair_amount"] for i in items),
+        "oil_total": sum(i["oil_qty"] for i in items),
+    }
+
+
+def merge_unmatched_months(by_month, year, company_ids, car_type):
+    """เพิ่มค่าซ่อมที่จับคู่กับรถไม่ได้เข้าไปในยอดรายเดือน (เมื่อกรองประเภทรถอยู่ ไม่รวม เพราะไม่รู้ประเภท)"""
+    if car_type is not None:
+        return by_month
+    totals = {int(r["month"]): dict(r) for r in by_month}
+    extra = (
+        SummaryUnmatched.objects.filter(year=year, branch_company_id__in=company_ids)
+        .values("month")
+        .annotate(amount_sum=Sum("repair_amount"))
+    )
+    for r in extra:
+        month = int(r["month"])
+        row = totals.setdefault(
+            month, {"month": month, "month_th": MONTHS_TH[month - 1], "amount_sum": 0}
+        )
+        row["amount_sum"] = float(row["amount_sum"] or 0) + float(r["amount_sum"] or 0)
+    return [totals[m] for m in sorted(totals)]
+
+
 def build_dashboard(user, filters: DashboardFilters, today=None):
     today = today or date.today()
     company_ids = resolve_company_ids(user, filters.company)
+    is_other = filters.car_dep == OTHER_CAR_DEP
+    # car_dep_id=None -> Django กรองเป็น IS NULL (รถที่ไม่มีแผนก)
+    car_dep_id = None if is_other else filters.car_dep
 
     # เดือน 1 -> เดือนปัจจุบัน (ถ้าเป็นปีที่ผ่านมาแล้วแสดงครบ 12 เดือน)
     last_month = today.month if filters.year >= today.year else 12
     months = range(1, last_month + 1)
 
-    car_types = list(available_car_types(filters.car_dep, filters.year, company_ids))
+    car_types = list(available_car_types(car_dep_id, filters.year, company_ids))
     car_type = filters.car_type
     if car_type is not None and car_type not in {ct.id for ct in car_types}:
         car_type = None
 
-    car_rows, car_totals = build_car_table(filters.car_dep, filters.year, company_ids, car_type)
+    car_rows, car_totals = build_car_table(car_dep_id, filters.year, company_ids, car_type)
 
     # เลือกรถด้วย car_id + branch_company_id (code ของรถอาจว่างหรือซ้ำกัน)
     selected_car = None
@@ -345,7 +430,7 @@ def build_dashboard(user, filters: DashboardFilters, today=None):
             filters.car_id = None
             filters.branch_company_id = None
 
-    base_filter = {"car_dep_id": filters.car_dep, "year": filters.year}
+    base_filter = {"car_dep_id": car_dep_id, "year": filters.year}
     if car_type is not None:
         base_filter["car__car_type_id"] = car_type
     if selected_car:
@@ -367,12 +452,35 @@ def build_dashboard(user, filters: DashboardFilters, today=None):
         .annotate(amount_sum=Sum("amount"))
         .order_by("-amount_sum")
     )
+    # แยกตามรถ + บริษัท (ทะเบียนเดียวกันอาจอยู่คนละบริษัท)
     by_car = list(
-        repairs.annotate(car_name_code=Concat("car__name", Value(":"), "car__code"))
-        .values("car_name_code")
+        repairs.values(
+            "car_id", "branch_company_id", "car__name", "car__code", "branch_company__name"
+        )
         .annotate(amount_sum=Sum("amount"))
         .order_by("-amount_sum")
     )
+
+    # ตารางสี รถ x เดือน: เฉพาะรถที่ค่าซ่อมสูงสุด HEATMAP_CARS คัน
+    heat_cars = by_car[:HEATMAP_CARS]
+    heat_cells = (
+        repairs.filter(
+            reduce(
+                operator.or_,
+                (
+                    Q(car_id=c["car_id"], branch_company_id=c["branch_company_id"])
+                    for c in heat_cars
+                ),
+                Q(pk__in=[]),
+            )
+        )
+        .values("car_id", "branch_company_id", "month")
+        .annotate(amount_sum=Sum("amount"))
+    )
+    heat_map = {
+        (c["car_id"], c["branch_company_id"], int(c["month"])): float(c["amount_sum"] or 0)
+        for c in heat_cells
+    }
 
     oil_by_month = list(
         SummaryOil.objects.filter(**base_filter)
@@ -416,13 +524,20 @@ def build_dashboard(user, filters: DashboardFilters, today=None):
         work_hours.append(round(total_mile, 2))
         work_percent.append(round(percent, 2))
 
+    # แท็บอื่นๆ (ไม่ได้เลือกคันเดียว): รวมค่าซ่อมที่จับคู่กับรถไม่ได้ในยอดรายเดือนด้วย
+    # (ยอดในตารางรถยังเป็นของรถจริงเท่านั้น หน้าเว็บบวกยอดรวมเองที่แผงหัว)
+    unmatched = {"rows": [], "repair_total": 0.0, "oil_total": 0.0}
+    if is_other and not selected_car:
+        unmatched = build_unmatched(filters.year, company_ids)
+        by_month = merge_unmatched_months(by_month, filters.year, company_ids, car_type)
+
     repair_by_month = {int(i["month"]): float(i["amount_sum"] or 0) for i in by_month}
     work_by_month_map = {int(i["month"]): float(i["total_mile"] or 0) for i in work_by_month}
 
     def amounts(rows):
         return [float(r["amount_sum"] or 0) for r in rows]
 
-    return {
+    result = {
         "filters": {
             "company": filters.company,
             "year": filters.year,
@@ -451,9 +566,24 @@ def build_dashboard(user, filters: DashboardFilters, today=None):
             },
             "repair_by_car": {
                 # ตัด ':' ท้ายชื่อ กรณีรถไม่มี code
-                "labels": [_label((r["car_name_code"] or "").strip(":")) for r in by_car],
+                "labels": [car_label(r) for r in by_car],
+                "companies": [r["branch_company__name"] or "" for r in by_car],
                 "series": amounts(by_car),
                 "total": sum(amounts(by_car)),
+            },
+            "repair_heatmap": {
+                "labels": [MONTHS_TH[m - 1] for m in months],
+                "rows": [
+                    {
+                        "name": car_label(c),
+                        "company": c["branch_company__name"] or "",
+                        "data": [
+                            heat_map.get((c["car_id"], c["branch_company_id"], m), 0)
+                            for m in months
+                        ],
+                    }
+                    for c in heat_cars
+                ],
             },
             "oil_by_month": {
                 "labels": [_label(r["month_th"]) for r in oil_by_month],
@@ -472,4 +602,38 @@ def build_dashboard(user, filters: DashboardFilters, today=None):
             },
         },
         "reliability": build_reliability(base_filter, months),
+        "unmatched": unmatched,
     }
+    result["insights"] = build_insights(
+        result,
+        # เดือนปัจจุบันยังไม่จบ ไม่นำมาคิดแนวโน้ม
+        partial_last_month=filters.year == today.year,
+        **data_quality_counts(filters.year, company_ids, is_other, unmatched),
+    )
+    return result
+
+
+def data_quality_counts(year, company_ids, is_other, unmatched):
+    """ตัวเลขคุณภาพข้อมูลระดับบริษัท สำหรับข้อสังเกต (ไม่ขึ้นกับแท็บแผนก)"""
+    if is_other:
+        # แท็บอื่นๆ แสดงรายการที่จับคู่ไม่ได้และรถไม่มีแผนกอยู่แล้ว
+        return {"unmatched_total": unmatched["repair_total"], "no_dep_cars": 0}
+    unmatched_total = (
+        SummaryUnmatched.objects.filter(year=year, branch_company_id__in=company_ids).aggregate(
+            total=Sum("repair_amount")
+        )["total"]
+        or 0
+    )
+    no_dep = set()
+    for model in (SummaryRepair, SummaryOil, SummaryWork):
+        no_dep.update(
+            model.objects.filter(
+                year=year,
+                branch_company_id__in=company_ids,
+                car_dep_id__isnull=True,
+                car_id__isnull=False,
+            )
+            .values_list("car_id", "branch_company_id")
+            .distinct()
+        )
+    return {"unmatched_total": float(unmatched_total), "no_dep_cars": len(no_dep)}

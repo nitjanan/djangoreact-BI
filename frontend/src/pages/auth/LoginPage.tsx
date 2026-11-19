@@ -36,7 +36,7 @@ export function LoginPage() {
   )
 
   return (
-    <AuthShell title="เข้าสู่ระบบ" description="ระบบติดตามงานซ่อมบำรุงรถและเครื่องจักร">
+    <AuthShell title="เข้าสู่ระบบ" description="ใช้ชื่อผู้ใช้และรหัสผ่านเดียวกับระบบเดิม">
       <form onSubmit={onSubmit} className="grid gap-4" noValidate>
         {login.error && (
           <Alert variant="destructive">

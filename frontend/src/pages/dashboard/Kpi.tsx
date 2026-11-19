@@ -3,11 +3,14 @@ import type { ReactNode } from 'react'
 import { clampPercent } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-export function KpiGrid({ className, children }: { className?: string; children: ReactNode }) {
+/** แถบตัวเลขสรุป: แผ่นเดียว แบ่งช่องด้วยเส้น ไม่ใช่การ์ดแยกกัน */
+export function KpiStrip({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <div
       className={cn(
-        'grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border md:grid-cols-3 xl:grid-cols-6',
+        // จอมือถือ 2 คอลัมน์: ช่องสุดท้ายที่เหลือเดี่ยวให้ยืดเต็มแถว ไม่ให้เห็นช่องว่างสีเทา
+        'grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3 xl:grid-cols-5',
+        '[&>:last-child:nth-child(odd)]:col-span-2 sm:[&>:last-child:nth-child(odd)]:col-span-1',
         className,
       )}
     >
@@ -22,45 +25,28 @@ export function Kpi({
   unit,
   meter,
   note,
-  feature,
 }: {
   label: string
   value: string
   unit?: string
-  /** แถบความคืบหน้า 0–100 */
+  /** แถบ 0–100 */
   meter?: number | null
   note?: string
-  /** ตัวเลขหลัก (พื้นเข้ม) */
-  feature?: boolean
 }) {
   return (
-    <div
-      className={cn(
-        'flex flex-col gap-1 bg-card p-4',
-        feature && 'bg-primary text-primary-foreground',
-      )}
-    >
-      <span className={cn('text-xs text-muted-foreground', feature && 'text-primary-foreground/70')}>
-        {label}
-      </span>
-      <span className="text-2xl font-semibold tracking-tight tabular-nums">
+    <div className="flex flex-col gap-1.5 bg-card px-4 py-3.5">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="font-heading text-2xl leading-none font-semibold tracking-tight tabular-nums">
         {value}
         {unit && (
-          <small
-            className={cn(
-              'ml-1 text-xs font-normal text-muted-foreground',
-              feature && 'text-primary-foreground/70',
-            )}
-          >
-            {unit}
-          </small>
+          <small className="ml-1 font-sans text-xs font-normal text-muted-foreground">{unit}</small>
         )}
       </span>
       {meter !== undefined && (
-        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+        <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-muted" aria-hidden>
           <span
-            className="block h-full rounded-full"
-            style={{ width: `${clampPercent(meter)}%`, backgroundColor: '#1baf7a' }}
+            className="block h-full rounded-full bg-signal"
+            style={{ width: `${clampPercent(meter)}%` }}
           />
         </div>
       )}

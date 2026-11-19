@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 from dbapp.models import BaseCar, BaseCarDepartment, BaseCarType
 from dbapp.services import sync
 from dbapp.services.dashboard import (
+    OTHER_CAR_DEP,
     CompanyAccessDenied,
     DashboardFilters,
     build_dashboard,
@@ -151,6 +152,12 @@ class CarDepartmentViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = BaseCarDepartment.objects.exclude(id=4)
     serializer_class = s.CarDepartmentSerializer
     pagination_class = None
+
+    def list(self, request, *args, **kwargs):
+        response = super().list(request, *args, **kwargs)
+        # แท็บสุดท้าย: ข้อมูลที่ไม่มีแผนก (รถที่ยังไม่ได้ตั้งแผนก + รายการที่จับคู่กับรถไม่ได้)
+        response.data = [*response.data, {"id": OTHER_CAR_DEP, "name": "อื่นๆ"}]
+        return response
 
 
 class CarTypeViewSet(viewsets.ReadOnlyModelViewSet):

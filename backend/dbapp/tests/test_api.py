@@ -14,6 +14,7 @@ from dbapp.models import (
     SummaryMaintenance,
     SummaryOil,
     SummaryRepair,
+    SummaryUnmatched,
     SummaryWork,
     UserProfile,
 )
@@ -120,6 +121,14 @@ def test_dashboard_select_car(client):
     body = dashboard(client, company="ALL", car_id=1, branch_company_id="01").json()
     assert body["selected_car"]["code"] == "CAR1"
     assert body["charts"]["repair_by_car"]["total"] == 1000
+    heatmap = body["charts"]["repair_heatmap"]
+    assert len(heatmap["rows"]) == 1
+    assert heatmap["rows"][0]["company"]
+    assert len(body["charts"]["repair_by_car"]["companies"]) == len(
+        body["charts"]["repair_by_car"]["labels"]
+    )
+    assert len(heatmap["rows"][0]["data"]) == len(heatmap["labels"])
+    assert sum(heatmap["rows"][0]["data"]) == 1000
 
 
 def test_dashboard_cannot_select_car_of_hidden_company(client):
@@ -136,7 +145,7 @@ def test_dashboard_requires_company(client):
 def test_lookups_exclude_department_4(client):
     BaseCarDepartment.objects.create(id=4, name="ซ่อน")
     names = [d["name"] for d in client.get("/api/car-departments/").json()]
-    assert names == ["แผนกรถ"]
+    assert names == ["แผนกรถ", "อื่นๆ"]
     assert len(client.get("/api/cars/", {"code": "CAR2"}).json()) == 1
 
 
@@ -173,3 +182,78 @@ def test_sync_requires_superuser(client, data, monkeypatch):
     res = client.post("/api/sync/")
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+
+
+def test_sync_summary_continues_after_failed_step(monkeypatch):
+    from dbapp.services import sync
+
+    def boom(*args):
+        raise ValueError("bad row")
+
+    monkeypatch.setattr(sync, "sync_car_dep", lambda *a: True)
+    monkeypatch.setattr(sync, "sync_repair", boom)
+    monkeypatch.setattr(sync, "sync_oil", lambda *a: True)
+    monkeypatch.setattr(sync, "sync_work", lambda *a: False)
+    monkeypatch.setattr(sync, "sync_maintenance", lambda *a: True)
+    monkeypatch.setattr(sync, "sync_unmatched", lambda *a: True)
+
+    result = sync.sync_summary(None, None)
+    assert result == {
+        "car_dep": True,
+        "repair": False,
+        "oil": True,
+        "work": False,
+        "maintenance": True,
+        "unmatched": True,
+    }
+
+
+def test_other_tab_shows_cars_without_department_and_unmatched_expenses(client):
+    co1, co2, other = (BaseBranchCompany.objects.get(id=i) for i in ("01", "02", "09"))
+    no_dep_car = BaseCar.objects.create(id=3, code="X1", name="ตาชั่ง")
+    SummaryRepair.objects.create(
+        branch_company=co1, car=no_dep_car, car_dep=None, year=YEAR, month=1,
+        month_th="มกราคม", summary_date=date(YEAR, 1, 1), repair_name="อื่นๆ", amount=50,
+    )  # fmt: skip
+
+    def add(company, remark, amount, oil=0, month=1):
+        SummaryUnmatched.objects.create(
+            branch_company=company, year=YEAR, month=month, month_th="", remark=remark,
+            summary_date=date(YEAR, month, 1), repair_amount=amount, oil_qty=oil,
+        )  # fmt: skip
+
+    add(co1, "ปุ๋ยแอมโมเนียมไนเตรท", 300, month=1)
+    add(co1, "ปุ๋ยแอมโมเนียมไนเตรท", 200, month=2)  # รวมทั้งปีเป็นแถวเดียว
+    add(co2, "ZX210LC", 700, oil=40)
+    add(other, "บริษัทที่มองไม่เห็น", 99999)
+
+    body = dashboard(client, company="ALL", car_dep=0).json()
+    # รถที่ไม่มีแผนกอยู่ในตารางรถ ตัวเลขยังเป็นของรถจริงเท่านั้น
+    assert [r["code"] for r in body["car_table"]["rows"]] == ["X1"]
+    assert body["car_table"]["totals"]["repair_total"] == 50
+    unmatched = body["unmatched"]
+    assert [(r["remark"], r["repair_amount"]) for r in unmatched["rows"]] == [
+        ("ZX210LC", 700),
+        ("ปุ๋ยแอมโมเนียมไนเตรท", 500),
+    ]
+    assert unmatched["repair_total"] == 1200
+    assert unmatched["oil_total"] == 40
+    # ยอดรายเดือนรวมทั้งรถไม่มีแผนกและรายการที่จับคู่ไม่ได้: ม.ค. 50+300+700, ก.พ. 200
+    assert body["charts"]["repair_by_month"]["series"] == [1050, 200]
+
+    # แท็บแผนกปกติไม่มีรายการเหล่านี้
+    normal = dashboard(client, company="ALL").json()
+    assert normal["unmatched"]["rows"] == []
+    assert normal["charts"]["repair_by_type"]["total"] == 1500
+
+
+def test_repair_hours_handles_buddhist_year_and_typos():
+    from datetime import datetime
+
+    from dbapp.services.dashboard import repair_hours
+
+    reported = datetime(2026, 9, 25, 10, 0)
+    assert repair_hours(reported, datetime(2569, 9, 25, 13, 0)) == 3
+    assert repair_hours(reported, datetime(2599, 9, 25, 13, 0)) is None
+    assert repair_hours(reported, datetime(2026, 9, 25, 9, 0)) is None
+    assert repair_hours(reported, None) is None
