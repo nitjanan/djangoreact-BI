@@ -354,6 +354,15 @@ export interface components {
             repair_vs_work: components["schemas"]["RepairVsWorkChart"];
             repair_heatmap: components["schemas"]["HeatmapChart"];
         };
+        /**
+         * @description * `stale` - stale
+         *     * `cost` - cost
+         *     * `repeat` - repeat
+         *     * `failure` - failure
+         *     * `fuel` - fuel
+         * @enum {string}
+         */
+        CodeEnum: "stale" | "cost" | "repeat" | "failure" | "fuel";
         Company: {
             /** รหัสสาขาบริษัท */
             id: string;
@@ -373,6 +382,7 @@ export interface components {
             unmatched: components["schemas"]["Unmatched"];
             open_jobs: components["schemas"]["OpenJobs"];
             parts: components["schemas"]["Parts"];
+            watchlist: components["schemas"]["Watchlist"];
             insights: components["schemas"]["Insights"];
         };
         DashboardFilters: {
@@ -631,6 +641,33 @@ export interface components {
              * @description กำหนดสิทธิ์ทุกอย่างให้ผู้ใช้ โดยไม่ต้องการมอบหมายอย่างเป็นทางการ
              */
             is_superuser?: boolean;
+        };
+        WatchCar: {
+            car_id: number;
+            branch_company_id: string;
+            branch_company_name: string;
+            code: string;
+            name: string | null;
+            /** Format: double */
+            repair_total: number;
+            failure_count: number;
+            reasons: components["schemas"]["WatchReason"][];
+        };
+        WatchReason: {
+            code: components["schemas"]["CodeEnum"];
+            label: string;
+            detail: string;
+        };
+        WatchReasonCount: {
+            code: components["schemas"]["CodeEnum"];
+            label: string;
+            count: number;
+        };
+        Watchlist: {
+            car_count: number;
+            compared: boolean;
+            reasons: components["schemas"]["WatchReasonCount"][];
+            cars: components["schemas"]["WatchCar"][];
         };
         WorkChart: {
             labels: string[];

@@ -399,6 +399,7 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
     # import ที่นี่ เพราะ open_jobs ใช้ to_gregorian จากไฟล์นี้
     from dbapp.services.open_jobs import build_open_jobs
     from dbapp.services.parts import build_parts
+    from dbapp.services.watchlist import build_watchlist
 
     today = today or date.today()
     company_ids = resolve_company_ids(user, filters.company)
@@ -613,6 +614,15 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
             {k: v for k, v in base_filter.items() if k != "year"}, now=now
         ),
     }
+    # รถทั้งตาราง (ไม่กรองคันเดียว) เพื่อเทียบค่ากลางเหมือนตารางรถ
+    table_filter = {
+        "car_dep_id": car_dep_id,
+        "year": filters.year,
+        "branch_company_id__in": company_ids,
+    }
+    if car_type is not None:
+        table_filter["car__car_type_id"] = car_type
+    result["watchlist"] = build_watchlist(car_rows, table_filter, result["open_jobs"])
     result["insights"] = build_insights(
         result,
         # เดือนปัจจุบันยังไม่จบ ไม่นำมาคิดแนวโน้ม

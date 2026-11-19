@@ -303,6 +303,39 @@ class PartsJobSerializer(serializers.Serializer):
     parts = PartSerializer(many=True)
 
 
+WATCH_REASONS = ["stale", "cost", "repeat", "failure", "fuel"]
+
+
+class WatchReasonSerializer(serializers.Serializer):
+    code = serializers.ChoiceField(choices=WATCH_REASONS)
+    label = serializers.CharField()
+    detail = serializers.CharField()
+
+
+class WatchCarSerializer(serializers.Serializer):
+    car_id = serializers.IntegerField()
+    branch_company_id = serializers.CharField()
+    branch_company_name = serializers.CharField()
+    code = serializers.CharField()
+    name = serializers.CharField(allow_null=True)
+    repair_total = serializers.FloatField()
+    failure_count = serializers.IntegerField()
+    reasons = WatchReasonSerializer(many=True)
+
+
+class WatchReasonCountSerializer(serializers.Serializer):
+    code = serializers.ChoiceField(choices=WATCH_REASONS)
+    label = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class WatchlistSerializer(serializers.Serializer):
+    car_count = serializers.IntegerField()
+    compared = serializers.BooleanField()
+    reasons = WatchReasonCountSerializer(many=True)
+    cars = WatchCarSerializer(many=True)
+
+
 class PartsSerializer(serializers.Serializer):
     job_count = serializers.IntegerField()
     jobs_with_parts = serializers.IntegerField()
@@ -341,6 +374,7 @@ class DashboardSerializer(serializers.Serializer):
     unmatched = UnmatchedSerializer()
     open_jobs = OpenJobsSerializer()
     parts = PartsSerializer()
+    watchlist = WatchlistSerializer()
     insights = InsightsSerializer()
 
 
