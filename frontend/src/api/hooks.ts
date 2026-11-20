@@ -42,6 +42,19 @@ export function useLogin() {
   })
 }
 
+/** เข้าสู่ระบบจากลิงก์ในอีเมลรายงาน (token ใช้ได้ครั้งเดียว) */
+export function useReportLogin() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (token: string) =>
+      unwrap(api.POST('/api/auth/report-login/', { body: { token } })),
+    onSuccess: (me) => {
+      qc.clear()
+      qc.setQueryData(queryKeys.me, me)
+    },
+  })
+}
+
 export function useLogout() {
   const qc = useQueryClient()
   return useMutation({

@@ -207,6 +207,9 @@ export default function DashboardPage() {
                     onSelect={(row) =>
                       params.selectCar(row.car_id, row.branch_company_id)
                     }
+                    carTypes={data.car_types}
+                    carType={params.carType}
+                    onSelectCarType={params.selectCarType}
                   />
                 </Section>
 

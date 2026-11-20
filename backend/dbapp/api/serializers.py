@@ -11,6 +11,10 @@ class LoginSerializer(serializers.Serializer):
     password = serializers.CharField(style={"input_type": "password"}, trim_whitespace=False)
 
 
+class ReportLoginSerializer(serializers.Serializer):
+    token = serializers.CharField(help_text="token จากลิงก์ในอีเมลรายงาน")
+
+
 class PasswordResetSerializer(serializers.Serializer):
     email = serializers.EmailField()
 

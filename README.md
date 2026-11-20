@@ -1,4 +1,4 @@
-# Fleet Dashboard
+# STG Dashboard
 
 Dashboard รถ/เครื่องจักร (ค่าซ่อม น้ำมัน ชั่วโมงทำงาน MTBF/MTTR) เขียนใหม่จากโปรเจกต์ `djangodashboard`
 (Django + Bootstrap 5) เป็น **Django REST Framework + React (TypeScript)**
@@ -74,6 +74,33 @@ uv run pytest
 uv run ruff check . && uv run ruff format .
 ```
 
+### รายงานสรุปทางอีเมล (PDF)
+
+ส่งรายงานรายสัปดาห์ (จันทร์–อาทิตย์ที่แล้ว) และรายเดือน (เดือนที่แล้ว) เป็นไฟล์ PDF ไฟล์เดียวทุกแผนก:
+ภาพรวม, ตัวเลขหลักเทียบช่วงก่อน/ปีก่อน, การแจ้งซ่อม, ใบค้าง, รถที่ต้องจับตา, ต้นทุนซ่อมต่อชั่วโมงสูงสุด
+
+1. ตั้งค่าอีเมลใน `.env` (`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `DEFAULT_FROM_EMAIL`)
+2. เพิ่มผู้รับที่ Admin > **ผู้รับรายงานทางอีเมล** (เลือกรายสัปดาห์/รายเดือน และบริษัท ไม่เลือก = ทุกบริษัท)
+   ในหน้ารายชื่อมีคำสั่ง "ส่งรายงาน…ตอนนี้" ไว้ส่งทดสอบให้คนที่เลือก
+3. ดูหน้าตารายงานโดยไม่ส่งอีเมล:
+
+   ```bash
+   uv run python manage.py send_fleet_reports weekly --output reports/
+   ```
+
+4. ตั้งให้ส่งอัตโนมัติด้วย Windows Task Scheduler (สร้าง 2 งาน, Start in = โฟลเดอร์ `backend`):
+
+   | งาน | Trigger | Program | Arguments |
+   |---|---|---|---|
+   | รายสัปดาห์ | Weekly, Monday 07:00 | `uv` | `run python manage.py send_fleet_reports weekly --sync` |
+   | รายเดือน | Monthly, day 1, 07:00 | `uv` | `run python manage.py send_fleet_reports monthly --sync` |
+
+   `--sync` ดึงข้อมูลล่าสุดจาก webstock ก่อน (ดึงไม่ได้ก็ยังส่งจากข้อมูลเดิม)
+   รันซ้ำในช่วงเดียวกันจะไม่ส่งซ้ำ (ใช้ `--force` เพื่อส่งซ้ำ)
+
+ค่าซ่อม/น้ำมัน/ชั่วโมงทำงานเก็บเป็นรายเดือน รายงานรายสัปดาห์จึงแสดงเป็นยอดสะสมของเดือน
+ส่วนการแจ้งซ่อม/ปิดงานนับตามวันที่จริง · ฟอนต์ IBM Plex Sans Thai (OFL) อยู่ใน `dbapp/reports/fonts`
+
 ### ทำไม Django 4.2
 
 MariaDB 10.4 ใน XAMPP ไม่รองรับ Django 5.x — อัปเกรดเป็น MariaDB 10.5+ / MySQL 8 แล้วค่อยขยับไป Django 5.2 LTS
@@ -110,6 +137,8 @@ dbapp/services/
   external_api.py       เรียก webstock ด้วย JWT
   sync.py               ดึงข้อมูล webstock -> base_* / sum_*
   dashboard.py          คำนวณกราฟ ตารางรถ MTBF/MTTR
+dbapp/reports/          รายงาน PDF ทางอีเมล (period, data, pdf, send)
+dbapp/management/       คำสั่ง send_fleet_reports
 dbapp/api/              serializers, views, urls ของ DRF
 dbapp/tests/            pytest (ใช้ SQLite ในหน่วยความจำ)
 ```

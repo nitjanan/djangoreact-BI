@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AppLayout } from '@/layout/AppLayout'
 import { RequireAuth } from '@/layout/RequireAuth'
+import { AutoLoginPage } from '@/pages/auth/AutoLoginPage'
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
@@ -22,6 +23,8 @@ const router = createBrowserRouter([
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
   // ลิงก์ในอีเมล reset password (backend: FRONTEND_URL/reset-password/<uid>/<token>)
   { path: '/reset-password/:uid/:token', element: <ResetPasswordPage /> },
+  // ลิงก์ในอีเมลรายงาน (backend: dbapp/reports/login_link.py)
+  { path: '/auto-login', element: <AutoLoginPage /> },
   {
     element: <RequireAuth />,
     children: [

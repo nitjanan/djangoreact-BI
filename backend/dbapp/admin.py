@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db import models
 from django.forms import CheckboxSelectMultiple
 from import_export.admin import ImportExportModelAdmin
@@ -13,6 +13,7 @@ from dbapp.models import (
     BaseCarType,
     BaseRepairType,
     BaseVisible,
+    ReportSubscription,
     SummaryCarDep,
     SummaryCarJob,
     SummaryOil,
@@ -166,6 +167,59 @@ class SummaryCarJobAdmin(ImportExportModelAdmin):
     list_per_page = 20
 
 
+class ReportSubscriptionAdmin(admin.ModelAdmin):
+    list_display = [
+        "email",
+        "name",
+        "weekly",
+        "monthly",
+        "company_names",
+        "is_active",
+        "auto_login",
+        "login_user",
+        "last_weekly_period",
+        "last_monthly_period",
+    ]
+    list_filter = ["is_active", "weekly", "monthly", "auto_login"]
+    search_fields = ["email", "name"]
+    formfield_overrides = {
+        models.ManyToManyField: {"widget": CheckboxSelectMultiple},
+    }
+    readonly_fields = ["last_weekly_period", "last_monthly_period"]
+    actions = ["send_weekly_now", "send_monthly_now"]
+
+    @admin.display(description="user ที่ใช้ลิงก์อัตโนมัติ")
+    def login_user(self, obj):
+        from dbapp.reports.login_link import user_for_email
+
+        if not obj.auto_login:
+            return "ปิด"
+        user = user_for_email(obj.email)
+        return user.get_username() if user else "ไม่มี (ต้อง login เอง)"
+
+    @admin.display(description="บริษัท")
+    def company_names(self, obj):
+        return ", ".join(c.name or c.code for c in obj.companies.all()) or "ทุกบริษัท"
+
+    def _send_now(self, request, queryset, frequency):
+        from dbapp.reports.send import send_reports
+
+        result = send_reports(frequency, subscriptions=queryset, force=True)
+        label = f"{result.period.title} {result.period.label}"
+        if result.sent:
+            self.message_user(request, f"ส่ง{label} ให้ {len(result.sent)} คนแล้ว")
+        for email, error in result.failed:
+            self.message_user(request, f"ส่งให้ {email} ไม่สำเร็จ: {error}", messages.ERROR)
+
+    @admin.action(description="ส่งรายงานรายสัปดาห์ (สัปดาห์ที่แล้ว) ตอนนี้")
+    def send_weekly_now(self, request, queryset):
+        self._send_now(request, queryset, "weekly")
+
+    @admin.action(description="ส่งรายงานรายเดือน (เดือนที่แล้ว) ตอนนี้")
+    def send_monthly_now(self, request, queryset):
+        self._send_now(request, queryset, "monthly")
+
+
 admin.site.register(BaseAffiliatedCompany, BaseAffiliatedCompanyAdmin)
 admin.site.register(BaseBranchCompany, BaseBranchCompanyAdmin)
 admin.site.register(BaseVisible, BaseVisibleAdmin)
@@ -180,3 +234,4 @@ admin.site.register(SummaryRepair, SummaryRepairAdmin)
 admin.site.register(SummaryOil, SummaryOilAdmin)
 admin.site.register(SummaryWork, SummaryWorkAdmin)
 admin.site.register(SummaryCarJob, SummaryCarJobAdmin)
+admin.site.register(ReportSubscription, ReportSubscriptionAdmin)

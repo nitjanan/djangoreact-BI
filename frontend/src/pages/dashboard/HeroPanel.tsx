@@ -17,7 +17,6 @@ import type { useDashboardParams } from "@/lib/dashboard-params";
 import { num } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { useNoun } from "./export-context";
 import { ChangeNote } from "./Kpi";
 import {
   compareLabel,
@@ -27,7 +26,6 @@ import {
   periodLabel,
 } from "./period";
 
-const ALL_TYPES = "all";
 const THIS_YEAR = new Date().getFullYear();
 const THIS_MONTH = new Date().getMonth() + 1;
 const PERIOD_GROUPS = ["", "ครึ่งปี", "ไตรมาส", "เดือน"];
@@ -53,7 +51,6 @@ export function HeroPanel({
   syncing: boolean;
   onSync: () => void;
 }) {
-  const noun = useNoun();
   // ป้าย "กำลังดูเฉพาะ" ในแผงหัว: เลื่อนพ้นจอแล้วแสดงป้ายลอยด้านล่างแทน
   const [chip, setChip] = useState<HTMLDivElement | null>(null);
   const chipVisible = useInView(chip);
@@ -97,6 +94,8 @@ export function HeroPanel({
               className="flex w-fit items-center gap-1 rounded-full bg-signal py-1 pr-1 pl-3 text-sm font-medium text-signal-foreground"
             >
               กำลังดูเฉพาะ {selectedCar.code || selectedCar.name}
+              {selectedCar.branch_company_name &&
+                ` · ${selectedCar.branch_company_name}`}
               <button
                 type="button"
                 onClick={params.clearCar}
@@ -109,9 +108,12 @@ export function HeroPanel({
           )}
           {selectedCar && !chipVisible && (
             <FloatingCarPill
-              label={[selectedCar.code, selectedCar.name]
+              label={[
+                [selectedCar.code, selectedCar.name].filter(Boolean).join(" "),
+                selectedCar.branch_company_name,
+              ]
                 .filter(Boolean)
-                .join(" ")}
+                .join(" · ")}
               onClear={params.clearCar}
             />
           )}
@@ -248,27 +250,6 @@ export function HeroPanel({
               </SelectContent>
             </Select>
           </div>
-          <Select
-            value={params.carType === null ? ALL_TYPES : String(params.carType)}
-            onValueChange={(v) =>
-              params.selectCarType(v === ALL_TYPES ? null : Number(v))
-            }
-          >
-            <SelectTrigger
-              className="w-48 border-white/20 bg-white/5 text-white hover:bg-white/10 data-[placeholder]:text-plate-muted [&_svg]:text-plate-muted"
-              aria-label={`ประเภท${noun}`}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_TYPES}>ทุกประเภท{noun}</SelectItem>
-              {data?.car_types.map((t) => (
-                <SelectItem key={t.id} value={String(t.id)}>
-                  {t.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Button
             variant="ghost"
             onClick={params.resetFilters}

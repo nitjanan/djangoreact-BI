@@ -52,7 +52,7 @@ function Brand({ dark = false }: { dark?: boolean }) {
       </span>
       <span className="leading-tight">
         <span className={`block font-heading text-lg font-semibold ${dark ? 'text-foreground' : ''}`}>
-          Fleet Dashboard
+          STG Dashboard
         </span>
         <span className={`block text-xs ${dark ? 'text-muted-foreground' : 'text-plate-muted'}`}>
           งานซ่อมบำรุงรถและเครื่องจักร

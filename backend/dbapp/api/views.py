@@ -71,6 +71,29 @@ class LoginView(APIView):
         return Response(me_payload(user))
 
 
+@method_decorator(csrf_protect, name="dispatch")
+class ReportLoginView(APIView):
+    """เข้าสู่ระบบจากลิงก์ในอีเมลรายงาน (หน้า /auto-login ส่ง token มา) ใช้ได้ครั้งเดียว"""
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(request=s.ReportLoginSerializer, responses={200: s.MeSerializer})
+    def post(self, request):
+        from dbapp.reports.login_link import check_token
+
+        ser = s.ReportLoginSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        user = check_token(ser.validated_data["token"])
+        if user is None:
+            return Response(
+                {"detail": "ลิงก์เข้าสู่ระบบหมดอายุหรือถูกใช้ไปแล้ว กรุณาเข้าสู่ระบบด้วยรหัสผ่าน"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # login() อัปเดต last_login -> token นี้ใช้ซ้ำไม่ได้
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        return Response(me_payload(user))
+
+
 class LogoutView(APIView):
     @extend_schema(request=None, responses={204: None})
     def post(self, request):
@@ -100,7 +123,7 @@ class PasswordResetView(APIView):
             token = default_token_generator.make_token(user)
             link = f"{settings.FRONTEND_URL}/reset-password/{uid}/{token}"
             send_mail(
-                "ตั้งรหัสผ่านใหม่ - Fleet Dashboard",
+                "ตั้งรหัสผ่านใหม่ - STG Dashboard",
                 f"คลิกลิงก์นี้เพื่อตั้งรหัสผ่านใหม่ของบัญชี {user.get_username()}\n\n{link}\n",
                 None,
                 [user.email],

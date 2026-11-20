@@ -3,7 +3,13 @@ import { useState } from 'react'
 
 import type { CarRow, Schemas } from '@/api/client'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -24,6 +30,7 @@ type Metrics = CarRow | Schemas['CarTotals']
 const normalize = (s: string) => s.toLowerCase().replace(/[\s-]/g, '')
 
 const ALL_BRANDS = '__all__'
+const ALL_TYPES = 'all'
 const NO_BRAND = '__none__'
 /** กรอกต่างกันแค่ช่องว่าง/ขีด/วงเล็บ/ตัวพิมพ์ ถือเป็นยี่ห้อเดียวกัน (เหมือนตารางเทียบรุ่นฝั่ง server) */
 const brandKey = (brand: string | null | undefined) =>
@@ -41,7 +48,11 @@ function brandOptions(rows: CarRow[]) {
   return [...map.entries()]
     .map(([key, v]) => ({ key, ...v }))
     .sort((a, b) =>
-      a.key === NO_BRAND ? 1 : b.key === NO_BRAND ? -1 : b.count - a.count || a.label.localeCompare(b.label, 'th'),
+      a.key === NO_BRAND
+        ? 1
+        : b.key === NO_BRAND
+          ? -1
+          : b.count - a.count || a.label.localeCompare(b.label, 'th'),
     )
 }
 
@@ -219,10 +230,17 @@ export function CarTable({
   table,
   selected,
   onSelect,
+  carTypes,
+  carType,
+  onSelectCarType,
 }: {
   table: Schemas['CarTable']
   selected: CarRow | null
   onSelect: (row: CarRow) => void
+  /** ประเภทรถ: กรองทั้งหน้า (ฝั่ง server) ไม่ใช่แค่ตารางนี้ */
+  carTypes: { id: number; name: string }[]
+  carType: number | null
+  onSelectCarType: (id: number | null) => void
 }) {
   const noun = useNoun()
   const COLUMNS = columnsFor(useFuel())
@@ -294,6 +312,22 @@ export function CarTable({
             </button>
           )}
         </div>
+        <Select
+          value={carType === null ? ALL_TYPES : String(carType)}
+          onValueChange={(v) => onSelectCarType(v === ALL_TYPES ? null : Number(v))}
+        >
+          <SelectTrigger className="w-full bg-card sm:w-56" aria-label={`ประเภท${noun}`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TYPES}>ทุกประเภท{noun}</SelectItem>
+            {carTypes.map((t) => (
+              <SelectItem key={t.id} value={String(t.id)}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {brands.length > 1 && (
           <Select value={activeBrand} onValueChange={setBrand}>
             <SelectTrigger className="w-full bg-card sm:w-56" aria-label="กรองตามยี่ห้อ">
@@ -359,8 +393,8 @@ export function CarTable({
                   {q
                     ? `ไม่พบ${noun}ที่ชื่อ รหัส ยี่ห้อ หรือรุ่นตรงกับ "${query.trim()}"`
                     : filtering
-                    ? `ไม่มี${noun}ยี่ห้อนี้`
-                    : `ยังไม่มี${noun}ที่มีข้อมูลในตัวกรองนี้`}
+                      ? `ไม่มี${noun}ยี่ห้อนี้`
+                      : `ยังไม่มี${noun}ที่มีข้อมูลในตัวกรองนี้`}
                 </TableCell>
               </TableRow>
             )}

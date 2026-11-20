@@ -465,3 +465,44 @@ class SummaryMaintenancePart(models.Model):
 
     def __str__(self):
         return f"{self.ext_id}:{self.stkcod}"
+
+
+# REPORT EMAIL
+class ReportSubscription(models.Model):
+    """ผู้รับรายงานสรุปทางอีเมล (PDF) รายสัปดาห์/รายเดือน — ส่งด้วยคำสั่ง send_fleet_reports"""
+
+    name = models.CharField(max_length=255, blank=True, default="", verbose_name="ชื่อผู้รับ")
+    email = models.EmailField(verbose_name="อีเมล")
+    weekly = models.BooleanField(default=True, verbose_name="รายสัปดาห์ (ทุกวันจันทร์)")
+    monthly = models.BooleanField(default=True, verbose_name="รายเดือน (ทุกวันที่ 1)")
+    companies = models.ManyToManyField(
+        BaseBranchCompany,
+        blank=True,
+        limit_choices_to=~models.Q(code="ALL"),
+        verbose_name="บริษัท",
+        help_text="ไม่เลือก = ทุกบริษัท",
+    )
+    is_active = models.BooleanField(default=True, verbose_name="ส่งอยู่")
+    auto_login = models.BooleanField(
+        default=True,
+        verbose_name="ลิงก์เข้าสู่ระบบอัตโนมัติ",
+        help_text="ลิงก์ในเนื้ออีเมล (ไม่รวม PDF) เข้าระบบในชื่อ user ที่ใช้อีเมลนี้ได้เลย "
+        "ใช้ได้ครั้งเดียว หมดอายุ 7 วัน (รายสัปดาห์) / 31 วัน (รายเดือน) · ไม่ใช้กับ superuser",
+    )
+    # วันแรกของช่วงที่ส่งไปแล้ว กันส่งซ้ำเมื่อรันคำสั่งเกินหนึ่งครั้ง
+    last_weekly_period = models.DateField(
+        null=True, blank=True, editable=False, verbose_name="ส่งรายสัปดาห์ล่าสุด (ช่วงเริ่ม)"
+    )
+    last_monthly_period = models.DateField(
+        null=True, blank=True, editable=False, verbose_name="ส่งรายเดือนล่าสุด (ช่วงเริ่ม)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "report_subscription"
+        ordering = ("email",)
+        verbose_name = "ผู้รับรายงานทางอีเมล"
+        verbose_name_plural = "ผู้รับรายงานทางอีเมล"
+
+    def __str__(self):
+        return f"{self.name} <{self.email}>" if self.name else self.email

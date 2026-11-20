@@ -12,6 +12,7 @@ router.register("cars", views.CarViewSet)
 urlpatterns = [
     path("auth/csrf/", views.CsrfView.as_view(), name="auth-csrf"),
     path("auth/login/", views.LoginView.as_view(), name="auth-login"),
+    path("auth/report-login/", views.ReportLoginView.as_view(), name="auth-report-login"),
     path("auth/logout/", views.LogoutView.as_view(), name="auth-logout"),
     path("auth/password-reset/", views.PasswordResetView.as_view(), name="password-reset"),
     path(

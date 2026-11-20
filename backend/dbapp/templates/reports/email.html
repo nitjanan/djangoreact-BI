@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ heading }}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef4f4;font-family:'Segoe UI',Tahoma,'Noto Sans Thai',sans-serif;color:#1f2d2f;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef4f4;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #d6e3e3;">
+
+  <!-- หัวอีเมล -->
+  <tr><td style="background:#0b4f5c;padding:22px 28px;">
+    <div style="font-size:13px;color:#a9d3d6;">STG Dashboard · งานซ่อมบำรุงรถและเครื่องจักร</div>
+    <div style="font-size:22px;font-weight:bold;color:#ffffff;margin-top:6px;">{{ heading }}</div>
+    <div style="font-size:14px;color:#d8ecec;margin-top:6px;">{{ scope }}</div>
+  </td></tr>
+
+  <!-- ปุ่มเปิด dashboard -->
+  <tr><td style="padding:22px 28px 6px;">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="padding:0 8px 8px 0;">
+        <a href="{{ url }}" style="display:inline-block;background:#e8643c;color:#ffffff;text-decoration:none;font-weight:bold;font-size:15px;padding:11px 20px;border-radius:8px;">เปิด dashboard {{ period_short }}</a>
+      </td>
+      <td style="padding:0 0 8px 0;">
+        <a href="{{ year_url }}" style="display:inline-block;background:#ffffff;color:#0b4f5c;text-decoration:none;font-weight:bold;font-size:15px;padding:10px 18px;border-radius:8px;border:1px solid #0b4f5c;">ดู{{ year_label }}</a>
+      </td>
+    </tr></table>
+  </td></tr>
+
+  <!-- ตัวเลขรวม -->
+  <tr><td style="padding:12px 28px 4px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      {% for t in tiles %}
+      <td width="33%" valign="top" style="padding:0 {% if not forloop.last %}8px{% else %}0{% endif %} 0 0;">
+        <div style="background:#f3f8f8;border-radius:10px;padding:14px 14px;">
+          <div style="font-size:13px;color:#5b6f72;">{{ t.label }}</div>
+          <div style="font-size:22px;font-weight:bold;color:#0b4f5c;margin-top:4px;">{{ t.value }}</div>
+          <div style="font-size:12px;color:{{ t.note_color|default:'#5b6f72' }};margin-top:2px;">{{ t.note }}</div>
+        </div>
+      </td>
+      {% endfor %}
+    </tr></table>
+  </td></tr>
+
+  <!-- ตารางรายแผนก -->
+  <tr><td style="padding:20px 28px 4px;">
+    <div style="font-size:16px;font-weight:bold;color:#0b4f5c;margin-bottom:8px;">แยกตามแผนก</div>
+    {% if rows %}
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;">
+      <tr style="color:#5b6f72;font-size:12px;">
+        <td style="padding:8px 6px;border-bottom:2px solid #d6e3e3;">แผนก</td>
+        <td align="right" style="padding:8px 6px;border-bottom:2px solid #d6e3e3;">ค่าซ่อม (บาท)</td>
+        <td align="right" style="padding:8px 6px;border-bottom:2px solid #d6e3e3;">แจ้งซ่อมใหม่</td>
+        <td align="right" style="padding:8px 6px;border-bottom:2px solid #d6e3e3;">งานค้าง</td>
+        <td align="right" style="padding:8px 6px;border-bottom:2px solid #d6e3e3;">ควรจับตา</td>
+      </tr>
+      {% for r in rows %}
+      <tr>
+        <td style="padding:9px 6px;border-bottom:1px solid #e6eeee;"><a href="{{ r.url }}" style="color:#0b6f80;font-weight:bold;text-decoration:underline;">{{ r.name }}</a></td>
+        <td align="right" style="padding:9px 6px;border-bottom:1px solid #e6eeee;white-space:nowrap;">
+          {{ r.repair }}{% if r.change %}<div style="font-size:11px;color:{{ r.change_color }};">{{ r.change }}</div>{% endif %}
+        </td>
+        <td align="right" style="padding:9px 6px;border-bottom:1px solid #e6eeee;">{{ r.new_jobs }}</td>
+        <td align="right" style="padding:9px 6px;border-bottom:1px solid #e6eeee;">{{ r.open_jobs }}</td>
+        <td align="right" style="padding:9px 6px;border-bottom:1px solid #e6eeee;">{{ r.watch }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div style="font-size:14px;color:#5b6f72;">ไม่มีข้อมูลในช่วงนี้</div>
+    {% endif %}
+  </td></tr>
+
+  <!-- คำอธิบาย -->
+  <tr><td style="padding:14px 28px 6px;font-size:12px;line-height:1.7;color:#5b6f72;">
+    {% for line in notes %}<div>{{ line }}</div>{% endfor %}
+    <div style="margin-top:6px;">รายละเอียดทั้งหมด (งานค้าง รถที่ควรจับตา และค่าซ่อมสูงสุด) อยู่ในไฟล์ PDF ที่แนบมา</div>
+  </td></tr>
+
+  {% if login %}
+  <!-- ลิงก์เข้าสู่ระบบอัตโนมัติ -->
+  <tr><td style="padding:12px 28px 4px;">
+    <div style="background:#fff6e5;border:1px solid #f3d9a4;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.6;color:#6b4e16;">
+      ปุ่มในอีเมลนี้จะเข้าสู่ระบบให้อัตโนมัติในชื่อ <b>{{ login.username }}</b>
+      ใช้ได้ครั้งเดียว ภายในวันที่ {{ login.expires }}<br>
+      กรุณาอย่าส่งต่ออีเมลนี้ · ลิงก์ในไฟล์ PDF ต้องเข้าสู่ระบบด้วยรหัสผ่านตามปกติ
+    </div>
+  </td></tr>
+  {% endif %}
+
+  <!-- ท้ายอีเมล -->
+  <tr><td style="padding:18px 28px 22px;font-size:12px;color:#8a9a9c;">
+    อีเมลนี้ส่งอัตโนมัติจาก STG Dashboard · หากไม่ต้องการรับแล้ว แจ้งผู้ดูแลระบบให้ปิดการส่ง
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

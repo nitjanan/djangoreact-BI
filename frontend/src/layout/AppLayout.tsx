@@ -56,7 +56,7 @@ export function AppLayout() {
                   </span>
                   <span className="grid leading-tight">
                     <span className="font-heading text-base font-semibold text-white">
-                      Fleet Dashboard
+                      STG Dashboard
                     </span>
                     <span className="text-xs text-plate-muted">งานซ่อมบำรุงรถและเครื่องจักร</span>
                   </span>

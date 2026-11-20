@@ -86,6 +86,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/report-login/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description เข้าสู่ระบบจากลิงก์ในอีเมลรายงาน (หน้า /auto-login ส่ง token มา) ใช้ได้ครั้งเดียว */
+        post: operations["auth_report_login_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/car-departments/": {
         parameters: {
             query?: never;
@@ -769,6 +786,10 @@ export interface components {
             repair: number[];
             work: number[];
         };
+        ReportLoginRequest: {
+            /** @description token จากลิงก์ในอีเมลรายงาน */
+            token: string;
+        };
         SeriesChart: {
             labels: string[];
             series: number[];
@@ -1008,6 +1029,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Detail"];
+                };
+            };
+        };
+    };
+    auth_report_login_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportLoginRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ReportLoginRequest"];
+                "multipart/form-data": components["schemas"]["ReportLoginRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Me"];
                 };
             };
         };
