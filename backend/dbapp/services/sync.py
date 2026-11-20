@@ -24,6 +24,7 @@ from dbapp.models import (
     SummaryMaintenancePart,
     SummaryOil,
     SummaryRepair,
+    SummaryRepairDoc,
     SummaryUnmatched,
     SummaryWork,
 )
@@ -255,6 +256,49 @@ def sync_car_jobs(start_date, end_date):
 
 
 @transaction.atomic
+def sync_repair_docs(start_date, end_date):
+    """ใบจ่ายอะไหล่รายใบ: นับการซ่อมของรถที่ไม่มีใบแจ้งซ่อม (webstock รุ่นเก่าไม่มี API นี้ -> ข้าม)"""
+    url = f"{get_base_url()}/all/exp/repair/docs/api/between/{start_date}/{end_date}/"
+    data = get_api_data(url)
+    if not data:
+        return False
+
+    # กัน FK error กรณี base ยังไม่ได้อัปเดต
+    car_ids = set(BaseCar.objects.values_list("id", flat=True))
+    car_dep_ids = set(BaseCarDepartment.objects.values_list("id", flat=True))
+    company_ids = set(BaseBranchCompany.objects.values_list("id", flat=True))
+
+    objs = []
+    for item in data:
+        docdat = date.fromisoformat(item["docdat"])
+        objs.append(
+            SummaryRepairDoc(
+                docnum=item["docnum"][:30],
+                docdat=docdat,
+                summary_date=docdat.replace(day=1),
+                year=docdat.year,
+                month=docdat.month,
+                remark=(item["remark"] or "")[:255],
+                requester=(item["requester"] or "")[:150],
+                repair_type=(item["repair_type"] or "")[:10] or None,
+                repair_name=(item.get("repair_name") or "")[:255],
+                ma_ref=(item["ma_ref"] or "")[:30] or None,
+                amount=item["amount"] or 0,
+                parts=item.get("parts") or [],  # webstock รุ่นก่อนเพิ่มรายการอะไหล่ไม่มีค่านี้
+                car_id=item["car_id"] if item["car_id"] in car_ids else None,
+                car_dep_id=item["car_dep"] if item["car_dep"] in car_dep_ids else None,
+                branch_company_id=(
+                    item["branch_company"] if item["branch_company"] in company_ids else None
+                ),
+            )
+        )
+
+    _delete_range(SummaryRepairDoc, start_date, end_date)
+    SummaryRepairDoc.objects.bulk_create(objs, batch_size=1000)
+    return True
+
+
+@transaction.atomic
 def sync_maintenance(today=None):
     today = today or date.today()
     # ย้อนไปต้นปีก่อนหน้า เผื่อใบแจ้งซ่อมที่ซ่อมข้ามปี
@@ -377,6 +421,7 @@ def sync_summary(start_date, end_date):
         "work": _safe_step("work", sync_work, start_date, end_date),
         "car_jobs": _safe_step("car_jobs", sync_car_jobs, start_date, end_date),
         "maintenance": _safe_step("maintenance", sync_maintenance),
+        "repair_docs": _safe_step("repair_docs", sync_repair_docs, start_date, end_date),
         "unmatched": _safe_step("unmatched", sync_unmatched, start_date, end_date),
     }
 
@@ -395,3 +440,11 @@ def run_recent_summary_sync(today=None, months=3):
     today = today or date.today()
     start_date = (today - relativedelta(months=months)).replace(day=1)
     return sync_summary(start_date, today)
+
+
+def run_daily_sync(today=None, months=3):
+    """งานอัปเดตอัตโนมัติทุกวัน: base ก่อน (รถคันใหม่ต้องมีก่อนผูกข้อมูลสรุป) แล้วสรุปย้อนหลัง N เดือน
+
+    ใบแจ้งซ่อมดึงตั้งแต่ต้นปีก่อนเสมอ (ดู sync_maintenance) ไม่ขึ้นกับ N
+    """
+    return {"base": sync_base_data(), "summary": run_recent_summary_sync(today, months)}

@@ -5,19 +5,22 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.forms import PasswordResetForm, SetPasswordForm
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
+from django.http import HttpResponse
+from django.utils.crypto import constant_time_compare
 from django.utils.decorators import method_decorator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from dbapp.models import BaseCar, BaseCarDepartment, BaseCarType
 from dbapp.services import sync
+from dbapp.services.car_history import CarNotFound, build_car_history
 from dbapp.services.dashboard import (
     OTHER_CAR_DEP,
     CompanyAccessDenied,
@@ -26,6 +29,7 @@ from dbapp.services.dashboard import (
     user_companies,
     user_visible_tabs,
 )
+from dbapp.services.external_api import WebstockNotConfigured
 
 from . import serializers as s
 
@@ -224,6 +228,24 @@ class DashboardView(APIView):
         return Response(s.DashboardSerializer(data).data)
 
 
+class CarHistoryView(APIView):
+    """ประวัติรถรายคัน (หน้า /car/:car_id) — ทุกช่วงที่ sync มา ไม่กรองปี"""
+
+    @extend_schema(parameters=[s.CarHistoryQuerySerializer], responses=s.CarHistorySerializer)
+    def get(self, request, car_id):
+        query = s.CarHistoryQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        try:
+            data = build_car_history(
+                request.user, car_id, query.validated_data["branch_company_id"]
+            )
+        except CompanyAccessDenied as exc:
+            raise PermissionDenied("คุณไม่มีสิทธิ์ดูข้อมูลของบริษัทนี้") from exc
+        except CarNotFound as exc:
+            raise NotFound("ไม่พบรถคันนี้") from exc
+        return Response(s.CarHistorySerializer(data).data)
+
+
 # ---------------------------------------------------------------- sync
 
 
@@ -252,6 +274,32 @@ class SyncSummaryView(APIView):
     @extend_schema(request=None, responses=s.SyncResultSerializer)
     def post(self, request):
         return Response({"status": "ok", "result": sync.run_recent_summary_sync()})
+
+
+def update_summary_from_api(request):
+    """งานอัปเดตอัตโนมัติทุกวัน (Task Scheduler/cron เรียก): base + ข้อมูลสรุปย้อนหลัง 3 เดือน
+
+    ต้องส่งรหัส SYNC_TOKEN ใน header X-Sync-Token เท่านั้น
+    (ไม่รับใน URL เพราะจะติดไปใน log/ประวัติเบราว์เซอร์ และไม่ใช้ session login
+    เพราะเป็น GET: เว็บอื่นแค่ฝังลิงก์ก็สั่ง sync แทน superuser ได้ — ปุ่มบน dashboard ใช้ /api/sync/)
+    แต่ละขั้นที่ดึงไม่ได้จะข้ามไป (ดู sync_summary) ตอบเป็นข้อความธรรมดา
+    """
+    token = request.headers.get("X-Sync-Token", "")
+    if not (settings.SYNC_TOKEN and constant_time_compare(token, settings.SYNC_TOKEN)):
+        return HttpResponse("forbidden", status=403, content_type="text/plain; charset=utf-8")
+    try:
+        result = sync.run_daily_sync()
+    except WebstockNotConfigured as e:
+        return HttpResponse(str(e), status=503, content_type="text/plain; charset=utf-8")
+    steps = {**result["base"], **result["summary"]}
+    if not any(steps.values()):
+        # ไม่ได้ข้อมูลเลยสักขั้น (webstock ล่ม/login ไม่ได้) ให้ scheduler เห็นว่าไม่สำเร็จ
+        return HttpResponse(
+            f"update summary from api failed: {', '.join(steps)}",
+            status=502,
+            content_type="text/plain; charset=utf-8",
+        )
+    return HttpResponse("update summary from api success")
 
 
 class SyncBaseView(APIView):

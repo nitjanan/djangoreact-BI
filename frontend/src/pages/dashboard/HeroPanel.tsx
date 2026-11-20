@@ -1,5 +1,14 @@
-import { ArrowUp, Clock, Download, Loader2, RotateCcw, X } from "lucide-react";
+import {
+  ArrowUp,
+  Clock,
+  Download,
+  History,
+  Loader2,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import type { Dashboard, Schemas } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -13,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { carHistoryPath } from "@/lib/car-path";
 import type { useDashboardParams } from "@/lib/dashboard-params";
 import { num } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -54,6 +64,9 @@ export function HeroPanel({
   // ป้าย "กำลังดูเฉพาะ" ในแผงหัว: เลื่อนพ้นจอแล้วแสดงป้ายลอยด้านล่างแทน
   const [chip, setChip] = useState<HTMLDivElement | null>(null);
   const chipVisible = useInView(chip);
+  // ไม่ได้เลือกคัน: แผงหัวพ้นจอแล้วแสดงป้ายลอยสีเขียวบอกตัวกรองที่ดูอยู่
+  const [hero, setHero] = useState<HTMLElement | null>(null);
+  const heroVisible = useInView(hero);
   const selectedCar = data?.selected_car ?? null;
   // unmatched มีค่าเฉพาะแท็บ "อื่นๆ" (ค่าซ่อมที่จับคู่กับรถไม่ได้) แท็บอื่นเป็น 0
   const repairTotal =
@@ -71,6 +84,7 @@ export function HeroPanel({
 
   return (
     <section
+      ref={setHero}
       aria-label="ภาพรวม"
       className="relative overflow-hidden rounded-2xl bg-hero text-plate-foreground"
     >
@@ -89,21 +103,33 @@ export function HeroPanel({
             {companyName}
           </h1>
           {selectedCar && (
-            <div
-              ref={setChip}
-              className="flex w-fit items-center gap-1 rounded-full bg-signal py-1 pr-1 pl-3 text-sm font-medium text-signal-foreground"
-            >
-              กำลังดูเฉพาะ {selectedCar.code || selectedCar.name}
-              {selectedCar.branch_company_name &&
-                ` · ${selectedCar.branch_company_name}`}
-              <button
-                type="button"
-                onClick={params.clearCar}
-                aria-label="กลับไปดูทุกคัน"
-                className="flex size-6 items-center justify-center rounded-full hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-signal-foreground"
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                ref={setChip}
+                className="flex w-fit items-center gap-1 rounded-full bg-signal py-1 pr-1 pl-3 text-sm font-medium text-signal-foreground"
               >
-                <X className="size-3.5" />
-              </button>
+                กำลังดูเฉพาะ {selectedCar.code || selectedCar.name}
+                {selectedCar.branch_company_name &&
+                  ` · ${selectedCar.branch_company_name}`}
+                <button
+                  type="button"
+                  onClick={params.clearCar}
+                  aria-label="กลับไปดูทุกคัน"
+                  className="flex size-6 items-center justify-center rounded-full hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-signal-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              <Link
+                to={carHistoryPath(
+                  selectedCar.car_id,
+                  selectedCar.branch_company_id,
+                )}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-3 py-1 text-sm text-white hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-signal"
+              >
+                <History className="size-3.5" aria-hidden />
+                ดูประวัติทั้งหมดของคันนี้
+              </Link>
             </div>
           )}
           {selectedCar && !chipVisible && (
@@ -115,6 +141,24 @@ export function HeroPanel({
                 .filter(Boolean)
                 .join(" · ")}
               onClear={params.clearCar}
+              historyPath={carHistoryPath(
+                selectedCar.car_id,
+                selectedCar.branch_company_id,
+              )}
+            />
+          )}
+          {!selectedCar && data && !heroVisible && (
+            <FloatingCarPill
+              tone="filter"
+              label={[
+                companyName,
+                departments?.find((d) => d.id === params.carDep)?.name,
+                data.car_types.find((t) => t.id === data.filters.car_type)
+                  ?.name ?? `ทุกประเภท${data.filters.unit_noun}`,
+                periodLabel(year, range, wholeYear),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
           )}
         </div>
@@ -292,20 +336,36 @@ function useInView(el: Element | null) {
   return visible;
 }
 
-/** ป้ายลอยกลางล่างจอ: บอกว่ากำลังดูรถคันเดียวอยู่ กดชื่อเพื่อกลับขึ้นไปด้านบน กด × เพื่อดูทุกคัน */
+/** ป้ายลอยกลางล่างจอ กดชื่อเพื่อกลับขึ้นไปด้านบน
+ *
+ * tone="car" (ส้ม): ดูรถคันเดียวอยู่ มีปุ่มดูประวัติ และ × เพื่อดูทุกคัน
+ * tone="filter" (เขียว): ไม่ได้เลือกคัน แสดงตัวกรองที่ดูอยู่
+ */
 function FloatingCarPill({
   label,
   onClear,
+  historyPath,
+  tone = "car",
 }: {
   label: string;
-  onClear: () => void;
+  onClear?: () => void;
+  historyPath?: string;
+  tone?: "car" | "filter";
 }) {
+  const isCar = tone === "car";
   return (
     <div
       role="status"
       className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4 animate-in fade-in slide-in-from-bottom-2"
     >
-      <div className="flex max-w-full items-center gap-1 rounded-full border border-black/10 bg-signal py-1 pr-1 pl-1 text-sm font-medium text-signal-foreground shadow-lg">
+      <div
+        className={cn(
+          "flex max-w-full items-center gap-1 rounded-full border border-black/10 py-1 pr-1 pl-1 text-sm font-medium shadow-lg",
+          isCar
+            ? "bg-signal text-signal-foreground"
+            : "bg-emerald-600 text-white",
+        )}
+      >
         <button
           type="button"
           onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
@@ -313,16 +373,30 @@ function FloatingCarPill({
           className="flex min-w-0 items-center gap-1.5 rounded-full py-1 pr-1 pl-2.5 hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-signal-foreground"
         >
           <ArrowUp className="size-3.5 shrink-0" aria-hidden />
-          <span className="truncate">กำลังดูเฉพาะ {label || "คันที่เลือก"}</span>
+          <span className="truncate">
+            {isCar ? `กำลังดูเฉพาะ ${label || "คันที่เลือก"}` : `กำลังดู ${label}`}
+          </span>
         </button>
-        <button
-          type="button"
-          onClick={onClear}
-          aria-label="กลับไปดูทุกคัน"
-          className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-signal-foreground"
-        >
-          <X className="size-3.5" />
-        </button>
+        {historyPath && (
+          <Link
+            to={historyPath}
+            title="ดูประวัติทั้งหมดของคันนี้"
+            aria-label="ดูประวัติทั้งหมดของคันนี้"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-signal-foreground"
+          >
+            <History className="size-3.5" />
+          </Link>
+        )}
+        {onClear && (
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label="กลับไปดูทุกคัน"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full hover:bg-black/10 focus-visible:outline-2 focus-visible:outline-signal-foreground"
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

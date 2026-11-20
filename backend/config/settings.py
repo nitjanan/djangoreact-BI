@@ -172,6 +172,8 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 MAINTENANCE_API_BASE = os.environ.get("MAINTENANCE_API_BASE", "") or None
 # งานจากบันทึกการใช้รถ (car_jobs) มีแค่ webstock บนเครื่อง local ตอนนี้: ว่าง = ใช้ BaseAPI
 CARLOG_JOBS_API_BASE = os.environ.get("CARLOG_JOBS_API_BASE", "") or None
+# รหัสลับของงานอัปเดตอัตโนมัติ (/api/update_summary_from_api/, header X-Sync-Token) ว่าง = ปิด
+SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
 
 # dev: เสิร์ฟ static จาก app โดยไม่ต้อง collectstatic
 WHITENOISE_USE_FINDERS = DEBUG

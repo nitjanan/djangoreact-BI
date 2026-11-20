@@ -15,6 +15,7 @@ from dbapp.models import (
     SummaryMaintenance,
     SummaryOil,
     SummaryRepair,
+    SummaryRepairDoc,
     SummaryUnmatched,
     SummaryWork,
     UserProfile,
@@ -187,6 +188,54 @@ def test_sync_requires_superuser(client, data, monkeypatch):
     assert res.json()["status"] == "ok"
 
 
+def test_update_summary_from_api_needs_token_and_returns_text(client, data, settings, monkeypatch):
+    from dbapp.services import sync
+
+    calls = []
+    monkeypatch.setattr(
+        sync,
+        "run_daily_sync",
+        lambda: calls.append(1) or {"base": {"car": True}, "summary": {"repair": False}},
+    )
+    url = "/api/update_summary_from_api/"
+    settings.SYNC_TOKEN = ""
+    assert client.get(url, HTTP_X_SYNC_TOKEN="").status_code == 403  # ยังไม่ตั้งรหัส: ปิด
+
+    settings.SYNC_TOKEN = "s3cret"
+    assert client.get(url, HTTP_X_SYNC_TOKEN="wrong").status_code == 403
+    assert client.get(url, {"token": "s3cret"}).status_code == 403  # ไม่รับรหัสใน URL
+    from django.contrib.auth import get_user_model
+
+    superuser = get_user_model().objects.create_superuser("admin2", password="x")
+    client.force_login(superuser)
+    assert client.get(url).status_code == 403  # GET ไม่ใช้ session (กัน CSRF)
+    assert calls == []
+    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret")
+    assert (res.status_code, res.content.decode()) == (200, "update summary from api success")
+    assert len(calls) == 1
+
+    # ดึงไม่ได้เลยสักขั้น: ไม่บอกว่าสำเร็จ
+    monkeypatch.setattr(
+        sync, "run_daily_sync", lambda: {"base": {"car": False}, "summary": {"repair": False}}
+    )
+    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret")
+    assert res.status_code == 502 and "car, repair" in res.content.decode()
+
+
+def test_daily_sync_runs_base_then_recent_summary(monkeypatch):
+    from datetime import date
+
+    from dbapp.services import sync
+
+    order = []
+    monkeypatch.setattr(sync, "sync_base_data", lambda: order.append("base") or {})
+    monkeypatch.setattr(
+        sync, "sync_summary", lambda start, end: order.append(("summary", start, end)) or {}
+    )
+    sync.run_daily_sync(today=date(2026, 11, 20))
+    assert order == ["base", ("summary", date(2026, 8, 1), date(2026, 11, 20))]
+
+
 def test_sync_without_webstock_config_explains_instead_of_500(client, data):
     # ไม่มี BaseAPI "webstock" -> บอกให้ไปตั้งค่า แทน error 500 ที่ไม่บอกอะไร
     data["user"].is_superuser = True
@@ -259,6 +308,7 @@ def test_sync_summary_continues_after_failed_step(monkeypatch):
     monkeypatch.setattr(sync, "sync_maintenance", lambda *a: True)
     monkeypatch.setattr(sync, "sync_unmatched", lambda *a: True)
     monkeypatch.setattr(sync, "sync_car_jobs", lambda *a: True)
+    monkeypatch.setattr(sync, "sync_repair_docs", lambda *a: True)
 
     result = sync.sync_summary(None, None)
     assert result == {
@@ -268,6 +318,7 @@ def test_sync_summary_continues_after_failed_step(monkeypatch):
         "work": False,
         "car_jobs": True,
         "maintenance": True,
+        "repair_docs": True,
         "unmatched": True,
     }
 
@@ -478,3 +529,145 @@ def test_sync_car_jobs_uses_carlog_jobs_api_base(db, settings, monkeypatch):
             "http://local-webstock",
         )
     ]
+
+
+# ------------------------------------------- PM / downtime / สาขา / ประวัติรถ
+
+
+def add_pm(ext_id, company_id="01", car_id=1, month=1, open_=False):
+    SummaryMaintenance.objects.create(
+        ext_id=ext_id, branch_company_id=company_id, car_id=car_id, car_dep_id=1, year=YEAR,
+        month=month, summary_date=date(YEAR, month, 1), ma_type="04",
+        reported_at=datetime(YEAR, month, 10, 8),
+        finished_at=None if open_ else datetime(YEAR, month, 10, 10),
+    )  # fmt: skip
+
+
+def test_reliability_has_pm_ratio_and_downtime(client):
+    add_pm(2)
+    add_pm(3)
+    rel = dashboard(client, company="ALL").json()["reliability"]
+
+    assert rel["pm_count"] == 2
+    assert rel["pm_ratio"] == pytest.approx(200 / 3)  # PM 2 ใบ จาก PM + ซ่อม 3 ใบ
+    assert rel["downtime_hours"] == 4  # ใบซ่อม 1 ใบ 4 ชม. (PM ไม่นับ)
+    assert rel["trend"]["pm"][0] == 2 and rel["trend"]["downtime"][0] == 4
+    assert rel["top_downtime"]["labels"] == ["รถ 1:CAR1"]
+
+
+def test_branch_compare_only_when_several_companies(client):
+    body = dashboard(client, company="ALL").json()
+    branches = {b["branch_company_name"]: b for b in body["branch_compare"]}
+    assert set(branches) == {"สาขา 1", "สาขา 2"}  # สาขาที่ alice มองไม่เห็นไม่อยู่
+    assert branches["สาขา 1"]["repair_total"] == 1000
+    assert branches["สาขา 1"]["failure_count"] == 1 and branches["สาขา 2"]["failure_count"] == 0
+    assert branches["สาขา 1"]["downtime_hours"] == 4
+
+    assert dashboard(client, company="C01").json()["branch_compare"] == []
+
+
+def test_car_history(client):
+    add_pm(2, open_=True)
+    res = client.get("/api/car-history/1/", {"branch_company_id": "01"})
+    assert res.status_code == 200
+    body = res.json()
+
+    assert body["car"]["code"] == "CAR1"
+    assert body["car"]["branch_company_name"] == "สาขา 1"
+    # ไม่รวมค่าซ่อมของรถทะเบียนเดียวกันในบริษัทอื่น
+    assert body["totals"]["repair_total"] == 1000
+    assert body["totals"]["ticket_count"] == 2
+    assert body["totals"]["open_count"] == 1
+    assert body["totals"]["downtime_hours"] == 4
+    assert [t["ma_type_name"] for t in body["tickets"]] == ["PM", "ซ่อม"]  # ใหม่ -> เก่า
+    assert body["monthly"]["repair"] == [1000]
+
+
+def test_car_history_checks_company_access(client):
+    assert client.get("/api/car-history/1/", {"branch_company_id": "09"}).status_code == 403
+    assert client.get("/api/car-history/999/", {"branch_company_id": "01"}).status_code == 404
+
+
+def test_overlapping_repairs_count_downtime_once(client):
+    # ใบที่สองเปิดระหว่างใบแรก (5 ม.ค. 08-12) จนถึง 14:00 -> รวม 08-14 = 6 ชม. ไม่ใช่ 4 + 4
+    SummaryMaintenance.objects.create(
+        ext_id=5, branch_company_id="01", car_id=1, car_dep_id=1, year=YEAR, month=1,
+        summary_date=date(YEAR, 1, 1), ma_type="02",
+        reported_at=datetime(YEAR, 1, 5, 10), finished_at=datetime(YEAR, 1, 5, 14),
+    )  # fmt: skip
+    body = dashboard(client, company="ALL").json()
+    assert body["reliability"]["downtime_hours"] == 6
+    assert body["reliability"]["mttr"] == 4  # เวลาซ่อมต่อใบยังเฉลี่ยตามใบ
+    row = next(r for r in body["car_table"]["rows"] if r["code"] == "CAR1")
+    assert row["downtime_hours"] == 6
+    history = client.get("/api/car-history/1/", {"branch_company_id": "01"}).json()
+    assert history["totals"]["downtime_hours"] == 6
+
+
+def test_car_history_lists_parts_and_repair_costs(client):
+    from dbapp.models import SummaryMaintenancePart
+
+    SummaryMaintenancePart.objects.create(
+        ext_id=1, docnum="IS-001", docdat=date(YEAR, 1, 6), stkcod="FLT-01",
+        name="ไส้กรองน้ำมันเครื่อง", qty=2, unit="ชิ้น", amount=850,
+    )  # fmt: skip
+    body = client.get("/api/car-history/1/", {"branch_company_id": "01"}).json()
+
+    ticket = body["tickets"][0]
+    assert [p["name"] for p in ticket["parts"]] == ["ไส้กรองน้ำมันเครื่อง"]
+    assert ticket["parts_amount"] == 850
+    assert body["totals"]["parts_total"] == 850
+    assert body["repair_items"] == [
+        {"year": YEAR, "month": 1, "label": "ม.ค. 69", "repair_name": "เครื่องยนต์", "amount": 1000}
+    ]
+
+
+def add_doc(docnum, day, company_id="02", car_id=2, ma_ref=None, amount=500, month=1, name=""):
+    SummaryRepairDoc.objects.create(
+        docnum=docnum, docdat=date(YEAR, month, day), summary_date=date(YEAR, month, 1),
+        year=YEAR, month=month, ma_ref=ma_ref, amount=amount, repair_name=name,
+        branch_company_id=company_id, car_id=car_id, car_dep_id=1,
+    )  # fmt: skip
+
+
+def test_cars_without_tickets_count_repairs_from_issue_docs(client):
+    # รถ 2 ไม่มีใบแจ้งซ่อม: ใบจ่ายวันเดียวกัน/อ้างใบแจ้งซ่อมเดียวกัน = ซ่อม 1 ครั้ง
+    add_doc("OU1", 3)
+    add_doc("OU2", 3)
+    add_doc("OU3", 10, ma_ref="MJ16901001")
+    add_doc("OU4", 12, ma_ref="MJ16901001")
+    add_doc("OU5", 20, amount=0)  # มีแต่น้ำมัน ไม่นับ
+    # รถ 1 มีใบแจ้งซ่อมแล้ว: ไม่นับจากใบจ่ายซ้ำ
+    add_doc("OU6", 7, company_id="01", car_id=1)
+
+    body = dashboard(client, company="ALL").json()
+    rel = body["reliability"]
+    assert rel["failure_count"] == 3 and rel["doc_failure_count"] == 2
+    assert rel["trend"]["count"][0] == 3
+    assert rel["repair_closed"] == 1  # ใบจ่ายไม่มีเวลาปิดงาน ไม่เข้า MTTR
+    assert rel["top_cars"]["labels"] == ["รถ 2:CAR2", "รถ 1:CAR1"]
+    rows = {r["code"]: r for r in body["car_table"]["rows"]}
+    assert rows["CAR2"]["failure_count"] == 2 and rows["CAR1"]["failure_count"] == 1
+
+    history = client.get("/api/car-history/2/", {"branch_company_id": "02"}).json()
+    assert history["totals"]["breakdown_count"] == 2
+    assert history["doc_jobs"] == []  # ใบจ่ายในเทสต์นี้ไม่มีรายการอะไหล่
+    assert history["totals"]["doc_breakdown_count"] == 2
+    assert history["monthly"]["breakdowns"] == [2]
+
+
+def test_issue_docs_of_type_pm_count_as_pm_not_failures(client):
+    add_doc("OU1", 3)
+    add_doc("OU2", 3, name="PM")  # วันเดียวกัน แต่เป็น PM: PM 1 + ซ่อม 1
+    add_doc("OU3", 15, name=" pm ")
+
+    body = dashboard(client, company="ALL").json()
+    rel = body["reliability"]
+    assert rel["failure_count"] == 2 and rel["doc_failure_count"] == 1
+    assert rel["pm_count"] == 2 and rel["doc_pm_count"] == 2
+    assert rel["trend"]["pm"][0] == 2
+    rows = {r["code"]: r for r in body["car_table"]["rows"]}
+    assert rows["CAR2"]["failure_count"] == 1
+
+    totals = client.get("/api/car-history/2/", {"branch_company_id": "02"}).json()["totals"]
+    assert (totals["breakdown_count"], totals["pm_count"], totals["doc_pm_count"]) == (1, 2, 2)

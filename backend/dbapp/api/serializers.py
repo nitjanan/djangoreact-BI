@@ -135,6 +135,7 @@ class CarRowSerializer(serializers.Serializer):
     failure_count = serializers.IntegerField()
     mtbf = serializers.FloatField(allow_null=True)
     mttr = serializers.FloatField(allow_null=True)
+    downtime_hours = serializers.FloatField(help_text="ชั่วโมงหยุดซ่อมรวม (ใบซ่อมที่ปิดงานแล้ว)")
 
 
 class CarTotalsSerializer(serializers.Serializer):
@@ -150,6 +151,7 @@ class CarTotalsSerializer(serializers.Serializer):
     failure_count = serializers.IntegerField()
     mtbf = serializers.FloatField(allow_null=True)
     mttr = serializers.FloatField(allow_null=True)
+    downtime_hours = serializers.FloatField(help_text="ชั่วโมงหยุดซ่อมรวม (ใบซ่อมที่ปิดงานแล้ว)")
 
 
 class CompareSerializer(serializers.Serializer):
@@ -235,6 +237,8 @@ class ReliabilityTrendSerializer(serializers.Serializer):
     labels = _labels()
     count = serializers.ListField(child=serializers.IntegerField())
     mttr = serializers.ListField(child=serializers.FloatField(allow_null=True))
+    pm = serializers.ListField(child=serializers.IntegerField(), help_text="ใบ PM ต่อเดือน")
+    downtime = _floats()
 
 
 class TopCarsSerializer(serializers.Serializer):
@@ -243,14 +247,43 @@ class TopCarsSerializer(serializers.Serializer):
     count = serializers.ListField(child=serializers.IntegerField())
 
 
+class TopDowntimeSerializer(serializers.Serializer):
+    labels = _labels()
+    companies = _labels()
+    hours = _floats()
+
+
 class ReliabilitySerializer(serializers.Serializer):
     failure_count = serializers.IntegerField()
+    doc_failure_count = serializers.IntegerField(
+        help_text="ส่วนของ failure_count ที่นับจากใบจ่ายอะไหล่ (รถที่ไม่มีใบแจ้งซ่อม)"
+    )
+    doc_pm_count = serializers.IntegerField(
+        help_text="ส่วนของ pm_count ที่นับจากใบจ่ายอะไหล่ประเภท PM (รถที่ไม่มีใบแจ้งซ่อม)"
+    )
     repair_closed = serializers.IntegerField()
     mtbf = serializers.FloatField(allow_null=True)
     mttr = serializers.FloatField(allow_null=True)
     availability = serializers.FloatField(allow_null=True)
+    downtime_hours = serializers.FloatField(help_text="ชั่วโมงหยุดซ่อมรวม (ใบซ่อมที่ปิดงานแล้ว)")
+    pm_count = serializers.IntegerField()
+    pm_ratio = serializers.FloatField(allow_null=True, help_text="% PM ในงาน PM + ซ่อม")
     trend = ReliabilityTrendSerializer()
     top_cars = TopCarsSerializer()
+    top_downtime = TopDowntimeSerializer()
+
+
+class BranchCompareSerializer(serializers.Serializer):
+    branch_company_id = serializers.CharField()
+    branch_company_name = serializers.CharField()
+    car_count = serializers.IntegerField()
+    repair_total = serializers.FloatField()
+    work_total = serializers.FloatField()
+    repair_cost_per_hr = serializers.FloatField(allow_null=True)
+    percent_ma = serializers.FloatField(allow_null=True)
+    failure_count = serializers.IntegerField()
+    mtbf = serializers.FloatField(allow_null=True)
+    downtime_hours = serializers.FloatField()
 
 
 class UnmatchedRowSerializer(serializers.Serializer):
@@ -335,16 +368,6 @@ class TopPartSerializer(serializers.Serializer):
     jobs = serializers.IntegerField()
 
 
-class PartsJobSerializer(serializers.Serializer):
-    ext_id = serializers.IntegerField()
-    ref_no = serializers.CharField(allow_blank=True)
-    reported_at = serializers.DateTimeField()
-    broke_reason = serializers.CharField(allow_blank=True)
-    closed = serializers.BooleanField()
-    amount = serializers.FloatField()
-    parts = PartSerializer(many=True)
-
-
 WATCH_REASONS = ["stale", "cost", "replace", "repeat", "failure", "fuel"]
 
 
@@ -381,10 +404,11 @@ class WatchlistSerializer(serializers.Serializer):
 class PartsSerializer(serializers.Serializer):
     job_count = serializers.IntegerField()
     jobs_with_parts = serializers.IntegerField()
+    doc_count = serializers.IntegerField()  # การซ่อมจากใบจ่ายอะไหล่ (รถที่ไม่มีใบแจ้งซ่อม)
+    doc_amount = serializers.FloatField()
     amount = serializers.FloatField()
     amount_per_job = serializers.FloatField(allow_null=True)
     top = TopPartSerializer(many=True)
-    jobs = PartsJobSerializer(many=True)
 
 
 class InsightTargetSerializer(serializers.Serializer):
@@ -529,6 +553,7 @@ class DashboardSerializer(serializers.Serializer):
     jobs = JobsSerializer()
     watchlist = WatchlistSerializer()
     model_comparison = ModelComparisonSerializer()
+    branch_compare = BranchCompareSerializer(many=True, help_text="ว่าง = ดูบริษัทเดียวหรือเลือกรถคันเดียว")
     model_benchmark = ModelBenchmarkSerializer(
         allow_null=True, help_text="null = ไม่ได้เลือกรถ หรือรถคันนี้ยังไม่ได้กรอกยี่ห้อ"
     )
@@ -536,6 +561,102 @@ class DashboardSerializer(serializers.Serializer):
     insights = InsightsSerializer()
     last_synced_at = serializers.DateTimeField(
         allow_null=True, help_text="เวลาที่อัปเดตข้อมูลจาก webstock ครั้งล่าสุด"
+    )
+
+
+# ------------------------------------------------------------ car history
+
+
+class CarHistoryQuerySerializer(serializers.Serializer):
+    branch_company_id = serializers.CharField()
+
+
+class CarHistoryCarSerializer(serializers.Serializer):
+    car_id = serializers.IntegerField()
+    code = serializers.CharField()
+    name = serializers.CharField(allow_null=True)
+    brand = serializers.CharField(allow_null=True)
+    car_model = serializers.CharField(allow_null=True)
+    start_year = serializers.IntegerField(allow_null=True)
+    age = serializers.IntegerField(allow_null=True)
+    car_type_name = serializers.CharField(allow_null=True)
+    car_dep_id = serializers.IntegerField(allow_null=True)
+    car_dep_name = serializers.CharField(allow_null=True)
+    unit_noun = serializers.CharField()
+    branch_company_id = serializers.CharField()
+    branch_company_name = serializers.CharField()
+
+
+class CarHistoryTotalsSerializer(serializers.Serializer):
+    repair_total = serializers.FloatField()
+    work_total = serializers.FloatField()
+    repair_cost_per_hr = serializers.FloatField(allow_null=True)
+    ticket_count = serializers.IntegerField()
+    breakdown_count = serializers.IntegerField()
+    doc_breakdown_count = serializers.IntegerField(
+        help_text="ส่วนของ breakdown_count ที่นับจากใบจ่ายอะไหล่ (รถไม่มีใบแจ้งซ่อม)"
+    )
+    doc_pm_count = serializers.IntegerField(
+        help_text="ส่วนของ pm_count ที่นับจากใบจ่ายอะไหล่ประเภท PM (รถไม่มีใบแจ้งซ่อม)"
+    )
+    pm_count = serializers.IntegerField()
+    open_count = serializers.IntegerField()
+    downtime_hours = serializers.FloatField()
+    parts_total = serializers.FloatField()
+    data_from = serializers.CharField(allow_null=True, help_text="เดือนแรกที่มีข้อมูล")
+
+
+class CarHistoryMonthlySerializer(serializers.Serializer):
+    labels = _labels()
+    repair = _floats()
+    work = _floats()
+    breakdowns = serializers.ListField(child=serializers.IntegerField())
+    pm = serializers.ListField(child=serializers.IntegerField())
+
+
+class CarHistoryTicketSerializer(serializers.Serializer):
+    ext_id = serializers.IntegerField()
+    ref_no = serializers.CharField()
+    reported_at = serializers.DateTimeField()
+    finished_at = serializers.DateTimeField(allow_null=True)
+    ma_type = serializers.CharField()
+    ma_type_name = serializers.CharField()
+    broke_reason = serializers.CharField()
+    car_state = serializers.CharField()
+    is_open = serializers.BooleanField()
+    stage_label = serializers.CharField()
+    repair_hours = serializers.FloatField(allow_null=True)
+    parts = PartSerializer(many=True, help_text="อะไหล่จากใบจ่ายสินค้าภายในที่อ้างอิงใบนี้")
+    parts_amount = serializers.FloatField()
+    parts_count = serializers.IntegerField()
+
+
+class CarHistoryRepairItemSerializer(serializers.Serializer):
+    year = serializers.IntegerField()
+    month = serializers.IntegerField()
+    label = serializers.CharField()
+    repair_name = serializers.CharField()
+    amount = serializers.FloatField()
+
+
+class CarHistoryDocJobSerializer(serializers.Serializer):
+    ref_no = serializers.CharField(help_text="เลขที่ใบจ่ายอะไหล่ (หลายใบคั่นด้วย , )")
+    docdat = serializers.DateField()
+    is_pm = serializers.BooleanField()
+    amount = serializers.FloatField()
+    parts = PartSerializer(many=True)
+
+
+class CarHistorySerializer(serializers.Serializer):
+    car = CarHistoryCarSerializer()
+    totals = CarHistoryTotalsSerializer()
+    monthly = CarHistoryMonthlySerializer()
+    repair_items = CarHistoryRepairItemSerializer(
+        many=True, help_text="ค่าซ่อมรายเดือนแยกตามระบบ ใหม่ -> เก่า"
+    )
+    tickets = CarHistoryTicketSerializer(many=True)
+    doc_jobs = CarHistoryDocJobSerializer(
+        many=True, help_text="การซ่อมจากใบจ่ายอะไหล่ของรถที่ไม่มีใบแจ้งซ่อม ใหม่ -> เก่า"
     )
 
 

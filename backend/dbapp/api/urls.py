@@ -22,8 +22,11 @@ urlpatterns = [
     ),
     path("me/", views.MeView.as_view(), name="me"),
     path("dashboard/", views.DashboardView.as_view(), name="dashboard"),
+    path("car-history/<int:car_id>/", views.CarHistoryView.as_view(), name="car-history"),
     path("sync/", views.SyncAllView.as_view(), name="sync-all"),
     path("sync/summary/", views.SyncSummaryView.as_view(), name="sync-summary"),
     path("sync/base/", views.SyncBaseView.as_view(), name="sync-base"),
+    # งานอัปเดตอัตโนมัติทุกวัน (ตอบเป็นข้อความธรรมดา)
+    path("update_summary_from_api/", views.update_summary_from_api, name="update-summary-from-api"),
     *router.urls,
 ]

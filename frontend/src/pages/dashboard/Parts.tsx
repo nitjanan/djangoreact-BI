@@ -1,4 +1,5 @@
 import { ChevronRight, FileSpreadsheet } from "lucide-react";
+import { useState } from "react";
 
 import type { Schemas } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -13,20 +14,22 @@ import {
 import { downloadExcel } from "@/lib/export-excel";
 import { num } from "@/lib/format";
 
+import { SortHead, type Sort } from "./CarTable";
 import { useExportFilters } from "./export-context";
 import { Kpi, KpiStrip } from "./Kpi";
 
 type Parts = Schemas["Parts"];
 type Part = Schemas["Part"];
+type TopPart = Schemas["TopPart"];
 
 const TITLE = "อะไหล่ที่ใช้มากที่สุด";
 
-const thaiDate = (iso: string) =>
-  new Date(iso).toLocaleDateString("th-TH", {
-    day: "numeric",
-    month: "short",
-    year: "2-digit",
-  });
+/** คอลัมน์ที่กดเรียงได้ (หัวคอลัมน์ = key ของ Sort) */
+const SORT_COLUMNS = [
+  { label: "จำนวน", value: (p: TopPart) => p.qty },
+  { label: "ใช้ใน", value: (p: TopPart) => p.jobs },
+  { label: "มูลค่า", unit: "บาท", value: (p: TopPart) => p.amount },
+];
 
 /** ชื่ออะไหล่ ถ้าไม่มีในรายการสินค้าของ webstock แสดงรหัสแทน */
 function partName(p: { name: string; stkcod: string }) {
@@ -37,12 +40,14 @@ function partName(p: { name: string; stkcod: string }) {
 export function PartsDetails({
   parts,
   amount,
+  defaultOpen = false,
 }: {
   parts: Part[];
   amount: number;
+  defaultOpen?: boolean;
 }) {
   return (
-    <details className="group text-sm">
+    <details className="group text-sm" open={defaultOpen}>
       <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded text-xs text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className="size-3.5 transition-transform group-open:rotate-90"
@@ -57,12 +62,13 @@ export function PartsDetails({
             className="flex flex-wrap items-baseline gap-x-2"
           >
             <span className="min-w-0 flex-1">
-              {partName(p)}
+              {/* รหัสสินค้านำหน้าชื่อ (ไม่มีชื่อ partName แสดงรหัสอยู่แล้ว) */}
               {p.name && p.stkcod && (
-                <span className="ml-1 text-xs text-muted-foreground">
+                <span className="mr-1.5 font-mono text-xs text-muted-foreground">
                   {p.stkcod}
                 </span>
               )}
+              {partName(p)}
               <span className="ml-1 text-xs text-muted-foreground">
                 {p.docnum}
               </span>
@@ -80,25 +86,36 @@ export function PartsDetails({
   );
 }
 
-export function PartsSummary({
-  data,
-  carSelected,
-}: {
-  data: Parts;
-  carSelected: boolean;
-}) {
+export function PartsSummary({ data }: { data: Parts }) {
   const filters = useExportFilters();
+  // null = ลำดับจาก server (ใช้บ่อยที่สุดก่อน)
+  const [sort, setSort] = useState<Sort>(null);
+  const onSort = (key: string) =>
+    setSort((s) =>
+      s?.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "desc" },
+    );
+  const column = SORT_COLUMNS.find((c) => c.label === sort?.key);
+  const top =
+    sort && column
+      ? [...data.top].sort((a, b) =>
+          sort.dir === "asc"
+            ? column.value(a) - column.value(b)
+            : column.value(b) - column.value(a),
+        )
+      : data.top;
   const coverage = data.job_count
     ? (data.jobs_with_parts / data.job_count) * 100
     : 0;
 
-  if (data.jobs_with_parts === 0) {
+  if (data.jobs_with_parts === 0 && data.doc_count === 0) {
     return (
       <p className="rounded-xl border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
         ยังไม่มีข้อมูลอะไหล่ของใบแจ้งซ่อมในตัวกรองนี้
         <span className="mt-1 block text-xs">
-          อะไหล่มาจากใบจ่ายสินค้าภายใน-อะไหล่ใน Express
-          (คลังกรอกเลขที่ใบแจ้งซ่อมในช่อง note3)
+          อะไหล่มาจากใบจ่ายสินค้าภายใน-อะไหล่ใน Express (คลังกรอกเลขที่ใบแจ้งซ่อมในช่อง
+          note3 · รถที่ไม่มีใบแจ้งซ่อมใช้ใบจ่ายที่ระบุรถในช่อง remark)
         </span>
       </p>
     );
@@ -110,14 +127,7 @@ export function PartsSummary({
       unit: "บาท",
       filters,
       rows: [
-        [
-          "รหัส",
-          "ชื่ออะไหล่",
-          "จำนวน",
-          "หน่วย",
-          "ใช้ในใบแจ้งซ่อม (ใบ)",
-          "มูลค่า (บาท)",
-        ],
+        ["รหัส", "ชื่ออะไหล่", "จำนวน", "หน่วย", "ใช้ในการซ่อม (ครั้ง)", "มูลค่า (บาท)"],
         ...data.top.map((p) => [
           p.stkcod,
           p.name,
@@ -136,19 +146,27 @@ export function PartsSummary({
           label="ค่าอะไหล่รวม"
           value={num(data.amount, 0)}
           unit="บาท"
-          note="จากใบจ่ายสินค้าภายใน (ของที่ซื้อมาเข้าคลังก่อนเสมอ)"
+          note={
+            data.doc_count > 0
+              ? `รวม ${num(data.doc_amount, 0)} บาทจากใบจ่ายอะไหล่ของรถที่ไม่มีใบแจ้งซ่อม (${num(data.doc_count, 0)} ครั้ง)`
+              : "จากใบจ่ายสินค้าภายใน (ของที่ซื้อมาเข้าคลังก่อนเสมอ)"
+          }
         />
         <Kpi
           label="ค่าอะไหล่เฉลี่ยต่อการซ่อม"
           value={num(data.amount_per_job, 0)}
-          unit="บาท/ใบ"
+          unit="บาท/ครั้ง"
         />
         <Kpi
           label="ใบแจ้งซ่อมที่มีข้อมูลอะไหล่"
           value={`${num(data.jobs_with_parts, 0)} / ${num(data.job_count, 0)}`}
           unit="ใบ"
           meter={coverage}
-          note="นับเฉพาะใบจ่ายอะไหล่ที่คลังกรอกเลขที่ใบแจ้งซ่อม"
+          note={
+            data.doc_count > 0
+              ? "นับเฉพาะใบจ่ายที่คลังกรอกเลขที่ใบแจ้งซ่อม · รถที่ไม่มีใบแจ้งซ่อมนับจากใบจ่ายอะไหล่แทน"
+              : "นับเฉพาะใบจ่ายอะไหล่ที่คลังกรอกเลขที่ใบแจ้งซ่อม"
+          }
         />
       </KpiStrip>
 
@@ -156,7 +174,7 @@ export function PartsSummary({
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
           <h3 className="text-sm font-semibold">{TITLE}</h3>
           <span className="text-sm text-muted-foreground">
-            เรียงตามมูลค่า {data.top.length} อันดับแรก
+            เรียงตามจำนวนครั้งที่ใช้ {data.top.length} อันดับแรก
           </span>
           <Button
             variant="ghost"
@@ -174,18 +192,20 @@ export function PartsSummary({
             <TableRow className="hover:bg-transparent">
               <TableHead className="w-10">#</TableHead>
               <TableHead>อะไหล่</TableHead>
-              <TableHead className="text-right">จำนวน</TableHead>
-              <TableHead className="text-right">ใช้ใน</TableHead>
-              <TableHead className="text-right">
-                มูลค่า
-                <span className="block text-xs font-normal text-muted-foreground">
-                  บาท
-                </span>
-              </TableHead>
+              {SORT_COLUMNS.map((c) => (
+                <SortHead
+                  key={c.label}
+                  label={c.label}
+                  unit={c.unit}
+                  numeric
+                  sort={sort}
+                  onSort={onSort}
+                />
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.top.map((p, i) => (
+            {top.map((p, i) => (
               <TableRow key={p.stkcod || p.name}>
                 <TableCell className="text-muted-foreground tabular-nums">
                   {i + 1}
@@ -202,7 +222,7 @@ export function PartsSummary({
                   {num(p.qty, p.qty % 1 ? 2 : 0)} {p.unit}
                 </TableCell>
                 <TableCell className="text-right whitespace-nowrap tabular-nums">
-                  {p.jobs} ใบ
+                  {p.jobs} ครั้ง
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {num(p.amount, 2)}
@@ -212,34 +232,6 @@ export function PartsSummary({
           </TableBody>
         </Table>
       </div>
-
-      {carSelected && data.jobs.length > 0 && (
-        <div className="rounded-xl border bg-card">
-          <h3 className="border-b px-4 py-2.5 text-sm font-semibold">
-            ประวัติการซ่อมและอะไหล่ที่ใช้
-          </h3>
-          <ul className="divide-y">
-            {data.jobs.map((j) => (
-              <li key={j.ext_id} className="grid gap-1 px-4 py-3">
-                <div className="flex flex-wrap items-baseline gap-x-3">
-                  <span className="font-medium">{j.ref_no || "ไม่มีเลขที่"}</span>
-                  <span className="text-sm text-muted-foreground">
-                    {thaiDate(j.reported_at)}
-                  </span>
-                  {!j.closed && (
-                    <span className="text-xs text-destructive">ยังไม่ปิดงาน</span>
-                  )}
-                  <span className="ml-auto text-sm font-medium tabular-nums">
-                    {num(j.amount, 0)} บาท
-                  </span>
-                </div>
-                {j.broke_reason && <p className="text-sm">{j.broke_reason}</p>}
-                <PartsDetails parts={j.parts} amount={j.amount} />
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }

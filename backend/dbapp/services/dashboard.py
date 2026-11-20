@@ -9,7 +9,7 @@
 
 import operator
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from functools import reduce
 
 from django.db.models import Case, Count, F, FloatField, Max, Q, Sum, Value, When
@@ -24,6 +24,7 @@ from dbapp.models import (
     SummaryMaintenance,
     SummaryOil,
     SummaryRepair,
+    SummaryRepairDoc,
     SummaryUnmatched,
     SummaryWork,
     UserProfile,
@@ -39,6 +40,8 @@ MONTHS_TH = [
 
 # ประเภทใบแจ้งซ่อมที่นับเป็น "การเสีย" (02 = ซ่อม)
 MA_TYPE_BREAKDOWN = "02"
+MA_TYPE_PM = "04"  # บำรุงรักษาตามรอบ (PM)
+MA_TYPE_NAMES = {"01": "สั่งทำ", "02": "ซ่อม", "03": "ติดตั้ง", "04": "PM"}
 
 UNKNOWN = "ไม่ระบุ"
 
@@ -93,12 +96,30 @@ def to_gregorian(dt):
 
 def repair_hours(reported_at, finished_at):
     # เวลาซ่อม (ชม.) = ปิดงาน - แจ้งซ่อม
-    # ไม่นับใบที่ยังไม่ปิด เวลาปิดก่อนแจ้ง หรือนานเกิน 1 ปี (กรอกวันที่ผิด)
+    # ไม่นับใบที่ยังไม่ปิด เวลาปิดก่อนแจ้ง ปิดงานในอนาคต หรือนานเกิน 1 ปี (กรอกวันที่ผิด)
     reported_at, finished_at = to_gregorian(reported_at), to_gregorian(finished_at)
-    if not finished_at or finished_at <= reported_at:
+    if not finished_at or finished_at <= reported_at or finished_at > datetime.now():
         return None
     hours = (finished_at - reported_at).total_seconds() / 3600
     return hours if hours <= MAX_REPAIR_HOURS else None
+
+
+def repair_span(reported_at, finished_at):
+    """(เริ่ม, จบ) ของใบซ่อมที่ใช้คำนวณได้ (เงื่อนไขเดียวกับ repair_hours) ไม่งั้น None"""
+    if repair_hours(reported_at, finished_at) is None:
+        return None
+    return to_gregorian(reported_at), to_gregorian(finished_at)
+
+
+def merge_spans(spans):
+    """รวมช่วงที่ซ้อนกัน: รถคันเดียวมีหลายใบเปิดพร้อมกันก็หยุดอยู่ครั้งเดียว ไม่นับชั่วโมงซ้ำ"""
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(start, (end - start).total_seconds() / 3600) for start, end in merged]
 
 
 def cal_mtbf(work_total, failure_count):
@@ -147,6 +168,53 @@ def car_label(row):
     return f"{row['car__name'] or UNKNOWN}:{row['car__code'] or ''}".rstrip(":")
 
 
+def ticketless_docs(base_filter, fields=()):
+    """ใบจ่ายอะไหล่ (Express) ของรถที่ไม่มีใบแจ้งซ่อมเลยในตัวกรองนี้ เรียงตามวันที่
+
+    ใบแจ้งซ่อมเป็นข้อมูลหลัก: รถที่มีใบแจ้งซ่อมอย่างน้อย 1 ใบในช่วงนี้ไม่นับจากใบจ่ายซ้ำ
+    ไม่นับใบจ่ายที่มีแต่น้ำมัน (ยอดไม่รวมน้ำมันเป็น 0)
+    """
+    base_filter = {**base_filter, "car_id__isnull": False}
+    with_tickets = set(
+        SummaryMaintenance.objects.filter(**base_filter)
+        .values_list("car_id", "branch_company_id")
+        .distinct()
+    )
+    docs = (
+        SummaryRepairDoc.objects.filter(**base_filter, amount__gt=0)
+        .values("car_id", "branch_company_id", "month", "docdat", "ma_ref", "repair_name", *fields)
+        .order_by("docdat", "docnum")
+    )
+    for d in docs:
+        if (d["car_id"], d["branch_company_id"]) not in with_tickets:
+            d["is_pm"] = is_pm_repair(d.pop("repair_name"))
+            yield d
+
+
+def doc_event_key(doc):
+    """การซ่อม 1 ครั้ง = ใบจ่ายที่อ้างใบแจ้งซ่อม (note3) เดียวกัน หรือเบิกวันเดียวกัน แยก PM/ซ่อม
+
+    (วันเดียวกันมีทั้งใบ PM และใบซ่อม นับเป็น PM 1 ครั้ง + ซ่อม 1 ครั้ง)
+    """
+    return (doc["car_id"], doc["branch_company_id"], doc["ma_ref"] or doc["docdat"], doc["is_pm"])
+
+
+def doc_repair_events(base_filter, fields=()):
+    """การซ่อมจากใบจ่ายอะไหล่ของรถที่ไม่มีใบแจ้งซ่อม (ดู ticketless_docs, doc_event_key)
+
+    แต่ละครั้งมี is_pm: ประเภทการซ่อม (note2) เป็น "PM" = งานบำรุงรักษาตามรอบ ไม่ใช่การเสีย
+    ไม่มีเวลาปิดงาน จึงไม่มี MTTR/Downtime
+    """
+    events = {}
+    for d in ticketless_docs(base_filter, fields):
+        events.setdefault(doc_event_key(d), d)
+    return list(events.values())
+
+
+def is_pm_repair(repair_name):
+    return (repair_name or "").strip().upper() == "PM"
+
+
 def build_reliability(base_filter, months):
     failures = list(
         SummaryMaintenance.objects.filter(**base_filter, ma_type=MA_TYPE_BREAKDOWN).values(
@@ -171,6 +239,15 @@ def build_reliability(base_filter, months):
     month_durations = {}
     cars = {}
 
+    # PM (ma_type 04) เทียบกับการซ่อมเมื่อเสีย: PM น้อยแต่เสียบ่อย = บำรุงรักษาเชิงรุกยังไม่พอ
+    pm_months = {
+        int(r["month"]): r["n"]
+        for r in SummaryMaintenance.objects.filter(**base_filter, ma_type=MA_TYPE_PM)
+        .values("month")
+        .annotate(n=Count("id"))
+    }
+    pm_count = sum(pm_months.values())
+
     for f in failures:
         hours = repair_hours(f["reported_at"], f["finished_at"])
         month = int(f["month"])
@@ -183,16 +260,43 @@ def build_reliability(base_filter, months):
                 "company": f["branch_company__name"] or "",
                 "count": 0,
                 "durations": [],
+                "spans": [],
             },
         )
         car["count"] += 1
+        span = repair_span(f["reported_at"], f["finished_at"])
+        if span:
+            car["spans"].append(span)
 
         if hours is not None:
             durations.append(hours)
             month_durations.setdefault(month, []).append(hours)
             car["durations"].append(hours)
 
-    mtbf = cal_mtbf(work_total, len(failures))
+    # รถที่ไม่มีใบแจ้งซ่อม: นับการซ่อมจากใบจ่ายอะไหล่แทน (นับครั้งได้ แต่ไม่มีเวลาซ่อม)
+    doc_events = doc_repair_events(base_filter, ("car__code", "car__name", "branch_company__name"))
+    doc_pm = [d for d in doc_events if d["is_pm"]]
+    for d in doc_pm:
+        pm_months[int(d["month"])] = pm_months.get(int(d["month"]), 0) + 1
+    pm_count += len(doc_pm)
+    doc_events = [d for d in doc_events if not d["is_pm"]]
+    for d in doc_events:
+        month = int(d["month"])
+        month_counts[month] = month_counts.get(month, 0) + 1
+        car = cars.setdefault(
+            (d["car_id"], d["branch_company_id"]),
+            {
+                "label": car_label(d),
+                "company": d["branch_company__name"] or "",
+                "count": 0,
+                "durations": [],
+                "spans": [],
+            },
+        )
+        car["count"] += 1
+    failure_count = len(failures) + len(doc_events)
+
+    mtbf = cal_mtbf(work_total, failure_count)
     mttr = cal_mean(durations)
     availability = mtbf / (mtbf + mttr) * 100 if mtbf is not None and mttr is not None else None
 
@@ -201,25 +305,53 @@ def build_reliability(base_filter, months):
         key=lambda c: (c["count"], cal_mean(c["durations"]) or 0),
         reverse=True,
     )[:10]
+    # Downtime = ชั่วโมงที่รถหยุดซ่อม (แจ้งซ่อม -> ปิดงาน) ของใบที่ปิดงานแล้ว
+    # ใบที่เปิดซ้อนกันของคันเดียวกันนับเวลาครั้งเดียว · รายเดือนนับตามเดือนที่เริ่มหยุด
+    month_downtime = {}
+    for c in cars.values():
+        c["downtime"] = 0.0
+        for start, hours in merge_spans(c["spans"]):
+            c["downtime"] += hours
+            month_downtime[start.month] = month_downtime.get(start.month, 0) + hours
+    top_downtime = sorted(
+        (c for c in cars.values() if c["downtime"] > 0),
+        key=lambda c: c["downtime"],
+        reverse=True,
+    )[:10]
 
     trend_mttr = [cal_mean(month_durations.get(m, [])) for m in months]
+    planned = pm_count + failure_count
 
     return {
-        "failure_count": len(failures),
+        "failure_count": failure_count,
+        # ส่วนที่นับจากใบจ่ายอะไหล่ (รถที่ไม่มีใบแจ้งซ่อม)
+        "doc_failure_count": len(doc_events),
+        "doc_pm_count": len(doc_pm),
         "repair_closed": len(durations),
         "mtbf": mtbf,
         "mttr": mttr,
         "availability": availability,
+        "downtime_hours": sum(c["downtime"] for c in cars.values()),
+        "pm_count": pm_count,
+        # สัดส่วน PM ในงาน PM + ซ่อม (None = ไม่มีทั้งสองอย่าง)
+        "pm_ratio": pm_count / planned * 100 if planned else None,
         "trend": {
             "labels": [MONTHS_TH[m - 1] for m in months],
             "count": [month_counts.get(m, 0) for m in months],
             # None = ไม่มีข้อมูล (แสดงเป็นช่องว่างในกราฟ)
             "mttr": [round(v, 1) if v is not None else None for v in trend_mttr],
+            "pm": [pm_months.get(m, 0) for m in months],
+            "downtime": [round(month_downtime.get(m, 0), 1) for m in months],
         },
         "top_cars": {
             "labels": [c["label"] for c in top_cars],
             "companies": [c["company"] for c in top_cars],
             "count": [c["count"] for c in top_cars],
+        },
+        "top_downtime": {
+            "labels": [c["label"] for c in top_downtime],
+            "companies": [c["company"] for c in top_downtime],
+            "hours": [round(c["downtime"], 1) for c in top_downtime],
         },
     }
 
@@ -280,6 +412,7 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
                 "failure_count": 0,
                 "mtbf": None,
                 "mttr": None,
+                "downtime_hours": 0.0,
             }
         return rows[key]
 
@@ -353,6 +486,7 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
     # ใบแจ้งซ่อมประเภท "ซ่อม" ต่อคัน -> MTBF / MTTR
     all_durations = []
     car_durations = {}
+    car_spans = {}
     for item in SummaryMaintenance.objects.filter(**table_filter, ma_type=MA_TYPE_BREAKDOWN).values(
         *group_fields, "reported_at", "finished_at"
     ):
@@ -361,11 +495,22 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         hours = repair_hours(item["reported_at"], item["finished_at"])
         if hours is not None:
             all_durations.append(hours)
-            car_durations.setdefault((item["car_id"], item["branch_company_id"]), []).append(hours)
+            key = (item["car_id"], item["branch_company_id"])
+            car_durations.setdefault(key, []).append(hours)
+            car_spans.setdefault(key, []).append(
+                repair_span(item["reported_at"], item["finished_at"])
+            )
+
+    # รถที่ไม่มีใบแจ้งซ่อม: นับครั้งที่ซ่อมจากใบจ่ายอะไหล่ (ให้ตรงกับส่วนการเสียและเวลาซ่อม)
+    doc_fields = [f for f in group_fields if f not in ("car_id", "branch_company_id")]
+    for item in doc_repair_events(table_filter, doc_fields):
+        if not item["is_pm"]:
+            ensure_row(item)["failure_count"] += 1
 
     for key, row in rows.items():
         row["mtbf"] = cal_mtbf(row["work_total"], row["failure_count"])
         row["mttr"] = cal_mean(car_durations.get(key, []))
+        row["downtime_hours"] = sum(h for _, h in merge_spans(car_spans.get(key, [])))
 
     table_rows = sorted(rows.values(), key=lambda r: (r["code"], r["branch_company_name"]))
     work_sum = sum(r["work_total"] for r in table_rows)
@@ -391,8 +536,45 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         "failure_count": failure_sum,
         "mtbf": cal_mtbf(work_sum, failure_sum),
         "mttr": cal_mean(all_durations),
+        "downtime_hours": sum(r["downtime_hours"] for r in table_rows),
     }
     return table_rows, totals
+
+
+def build_branch_compare(car_rows):
+    """เทียบสาขา/บริษัท (เมื่อดูหลายบริษัท) จากแถวในตารางรถ — ตัวเลขจึงตรงกับตาราง"""
+    branches = {}
+    for r in car_rows:
+        b = branches.setdefault(
+            r["branch_company_id"],
+            {
+                "branch_company_id": str(r["branch_company_id"]),
+                "branch_company_name": r["branch_company_name"] or UNKNOWN,
+                "car_count": 0,
+                "repair_total": 0.0,
+                "work_total": 0.0,
+                "failure_count": 0,
+                "downtime_hours": 0.0,
+                "_ma": [],
+            },
+        )
+        b["car_count"] += 1
+        b["repair_total"] += r["repair_total"]
+        b["work_total"] += r["work_total"]
+        b["failure_count"] += r["failure_count"]
+        b["downtime_hours"] += r["downtime_hours"]
+        if r["percent_ma"] > 0:
+            b["_ma"].append(r["percent_ma"])
+
+    result = []
+    for b in branches.values():
+        ma = b.pop("_ma")
+        work = b["work_total"]
+        b["repair_cost_per_hr"] = b["repair_total"] / work if work > 0 else None
+        b["percent_ma"] = cal_mean(ma)
+        b["mtbf"] = cal_mtbf(work, b["failure_count"])
+        result.append(b)
+    return sorted(result, key=lambda b: b["repair_total"], reverse=True)
 
 
 # -------------------------------------------------------------- dashboard
@@ -765,7 +947,7 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
         },
         "reliability": build_reliability(base_filter, months),
         "unmatched": unmatched,
-        "parts": build_parts(base_filter, with_jobs=selected_car is not None),
+        "parts": build_parts(base_filter),
         "jobs": build_jobs(base_filter),
         # สถานะ ณ ตอนนี้ ไม่กรองปี
         "open_jobs": build_open_jobs(
@@ -788,6 +970,10 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
     }
     if car_type is not None:
         table_filter["car__car_type_id"] = car_type
+    # เทียบสาขา: เฉพาะตอนดูหลายบริษัทและไม่ได้เลือกคันเดียว
+    result["branch_compare"] = (
+        build_branch_compare(car_rows) if len(company_ids) > 1 and not selected_car else []
+    )
     result["model_comparison"] = build_model_comparison(car_rows, fuel)
     result["model_benchmark"] = build_model_benchmark(car_rows, selected_car, fuel)
     result["watchlist"] = build_watchlist(car_rows, table_filter, result["open_jobs"], noun, fuel)

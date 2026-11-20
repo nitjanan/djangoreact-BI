@@ -98,6 +98,19 @@ uv run ruff check . && uv run ruff format .
    `--sync` ดึงข้อมูลล่าสุดจาก webstock ก่อน (ดึงไม่ได้ก็ยังส่งจากข้อมูลเดิม)
    รันซ้ำในช่วงเดียวกันจะไม่ส่งซ้ำ (ใช้ `--force` เพื่อส่งซ้ำ)
 
+### อัปเดตข้อมูลอัตโนมัติทุกวัน
+
+`GET /api/update_summary_from_api/` ดึงข้อมูลหลัก (รถ ชนิด แผนก ประเภทซ่อม) แล้วดึงข้อมูลสรุป
+ย้อนหลัง 3 เดือน (ใบแจ้งซ่อมดึงตั้งแต่ต้นปีก่อนเสมอ) ตอบ `update summary from api success`
+
+1. ตั้ง `SYNC_TOKEN` ใน `backend/.env` เป็นข้อความสุ่มยาว ๆ แล้ว restart Django
+   (ไม่ตั้ง = ปิดใช้งาน) ส่งรหัสใน header `X-Sync-Token` เท่านั้น ไม่รับใน URL
+2. Windows Task Scheduler: Daily 06:00 (ก่อนรายงาน 07:00), Program `curl.exe`,
+   Arguments `-fsS -H "X-Sync-Token: <SYNC_TOKEN>" http://127.0.0.1:8001/api/update_summary_from_api/`
+
+ตอบ 403 = รหัสไม่ถูก · 503 = ยังไม่ได้ตั้งค่า webstock · 502 = ดึงไม่ได้เลยสักขั้น
+(ขั้นที่ดึงไม่ได้บางขั้นจะข้ามไปและเก็บข้อมูลเดิมไว้)
+
 ค่าซ่อม/น้ำมัน/ชั่วโมงทำงานเก็บเป็นรายเดือน รายงานรายสัปดาห์จึงแสดงเป็นยอดสะสมของเดือน
 ส่วนการแจ้งซ่อม/ปิดงานนับตามวันที่จริง · ฟอนต์ IBM Plex Sans Thai (OFL) อยู่ใน `dbapp/reports/fonts`
 
@@ -123,6 +136,7 @@ MariaDB 10.4 ใน XAMPP ไม่รองรับ Django 5.x — อัป�
 | POST | `/api/sync/` | `updateValueAPI/` |
 | POST | `/api/sync/summary/` | `update_summary_from_api/` |
 | POST | `/api/sync/base/` | `update_base_from_api/` |
+| GET | `/api/update_summary_from_api/` (header `X-Sync-Token`) | งานอัปเดตอัตโนมัติทุกวัน |
 
 ตัวกรอง (บริษัท แผนก ฯลฯ) ส่งเป็น query param แทนการเก็บใน session
 และ API ตรวจว่า user มีสิทธิ์เห็นบริษัทที่ขอ

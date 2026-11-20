@@ -11,6 +11,7 @@ import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage'
 import { LoginPage } from '@/pages/auth/LoginPage'
 import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage'
 const DashboardPage = lazy(() => import('@/pages/dashboard/DashboardPage'))
+const CarHistoryPage = lazy(() => import('@/pages/car/CarHistoryPage'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,15 @@ const router = createBrowserRouter([
             element: (
               <Suspense>
                 <DashboardPage />
+              </Suspense>
+            ),
+          },
+          {
+            // ประวัติรถรายคัน: /car/<car_id>?company=<branch_company_id>
+            path: 'car/:carId',
+            element: (
+              <Suspense>
+                <CarHistoryPage />
               </Suspense>
             ),
           },

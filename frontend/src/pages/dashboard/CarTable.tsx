@@ -167,7 +167,7 @@ const TEXT_COLUMNS: TextColumn[] = [
 /** ลำดับ + คอลัมน์ตัวหนังสือ (ใช้กับ colSpan ของแถวว่าง/แถวรวม) */
 const LEADING_COLUMNS = TEXT_COLUMNS.length + 1
 
-type Sort = { key: string; dir: 'asc' | 'desc' } | null
+export type Sort = { key: string; dir: 'asc' | 'desc' } | null
 
 /** ค่าว่างอยู่ท้ายเสมอ ไม่ว่าจะเรียงขึ้นหรือลง */
 function compare(a: SortValue, b: SortValue, dir: 'asc' | 'desc') {
@@ -182,7 +182,7 @@ function compare(a: SortValue, b: SortValue, dir: 'asc' | 'desc') {
 }
 
 /** หัวคอลัมน์ที่กดเรียงได้: ตัวเลขกดครั้งแรกเรียงมากไปน้อย ตัวหนังสือเรียง ก→ฮ กดซ้ำสลับทิศ */
-function SortHead({
+export function SortHead({
   label,
   unit,
   sort,

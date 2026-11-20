@@ -3,9 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { ApiError, api, unwrap } from './client'
 import type { paths } from './schema'
 
-export type DashboardQuery = NonNullable<
-  paths['/api/dashboard/']['get']['parameters']['query']
->
+export type DashboardQuery = NonNullable<paths['/api/dashboard/']['get']['parameters']['query']>
 
 export const queryKeys = {
   me: ['me'] as const,
@@ -46,8 +44,7 @@ export function useLogin() {
 export function useReportLogin() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (token: string) =>
-      unwrap(api.POST('/api/auth/report-login/', { body: { token } })),
+    mutationFn: (token: string) => unwrap(api.POST('/api/auth/report-login/', { body: { token } })),
     onSuccess: (me) => {
       qc.clear()
       qc.setQueryData(queryKeys.me, me)
@@ -95,6 +92,20 @@ export function useDashboard(query: DashboardQuery | null) {
     enabled: query !== null,
     // เปลี่ยนตัวกรองแล้วยังแสดงข้อมูลเดิมระหว่างโหลด (ไม่กระพริบเป็นหน้าว่าง)
     placeholderData: keepPreviousData,
+  })
+}
+
+/** ประวัติรถรายคัน (หน้า /car/:carId?company=<branch_company_id>) */
+export function useCarHistory(carId: number, branchCompanyId: string | null) {
+  return useQuery({
+    queryKey: ['car-history', carId, branchCompanyId] as const,
+    queryFn: () =>
+      unwrap(
+        api.GET('/api/car-history/{car_id}/', {
+          params: { path: { car_id: carId }, query: { branch_company_id: branchCompanyId! } },
+        }),
+      ),
+    enabled: Number.isFinite(carId) && branchCompanyId !== null,
   })
 }
 

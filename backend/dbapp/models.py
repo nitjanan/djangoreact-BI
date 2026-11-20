@@ -467,6 +467,42 @@ class SummaryMaintenancePart(models.Model):
         return f"{self.ext_id}:{self.stkcod}"
 
 
+class SummaryRepairDoc(models.Model):
+    """ใบจ่ายสินค้าภายใน-อะไหล่ รายใบ (Express/dbslc ผ่าน webstock)
+
+    ใช้นับการซ่อมของรถที่ไม่มีใบแจ้งซ่อมในช่วงที่ดู (ใบแจ้งซ่อมเป็นข้อมูลหลัก)
+    remark = รถ, note1 = ผู้เบิก, note2 = ประเภทการซ่อม, note3 = เลขที่ใบแจ้งซ่อม
+    """
+
+    docnum = models.CharField(max_length=30)
+    docdat = models.DateField()
+    summary_date = models.DateField(db_index=True)  # วันที่ 1 ของเดือน docdat
+    year = models.IntegerField()
+    month = models.IntegerField()
+
+    remark = models.CharField(max_length=255, blank=True, default="")
+    requester = models.CharField(max_length=150, blank=True, default="")  # note1
+    repair_type = models.CharField(max_length=10, null=True, blank=True)  # note2
+    # ชื่อประเภทการซ่อมของ note2 ใน webstock ("PM" = งานบำรุงรักษาตามรอบ)
+    repair_name = models.CharField(max_length=255, blank=True, default="")
+    ma_ref = models.CharField(max_length=30, null=True, blank=True)  # note3
+    amount = models.DecimalField(max_digits=15, decimal_places=2, default=0)  # ไม่รวมน้ำมัน
+    # รายการอะไหล่ในใบ (ไม่รวมน้ำมัน): [{stkcod, name, stktyp, qty, unit, amount}]
+    parts = models.JSONField(default=list, blank=True)
+
+    car = models.ForeignKey(BaseCar, on_delete=models.CASCADE, null=True, blank=True)
+    branch_company = models.ForeignKey(
+        BaseBranchCompany, on_delete=models.CASCADE, null=True, blank=True
+    )
+    car_dep = models.ForeignKey(BaseCarDepartment, on_delete=models.PROTECT, null=True, blank=True)
+
+    class Meta:
+        db_table = "sum_repair_doc"
+
+    def __str__(self):
+        return f"{self.docnum}:{self.car}"
+
+
 # REPORT EMAIL
 class ReportSubscription(models.Model):
     """ผู้รับรายงานสรุปทางอีเมล (PDF) รายสัปดาห์/รายเดือน — ส่งด้วยคำสั่ง send_fleet_reports"""

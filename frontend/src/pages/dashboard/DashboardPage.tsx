@@ -7,6 +7,7 @@ import { useCurrentUser } from "@/layout/RequireAuth";
 import { useDashboardParams } from "@/lib/dashboard-params";
 import { num } from "@/lib/format";
 
+import { BranchCompare } from "./BranchCompare";
 import { CarTable } from "./CarTable";
 import {
   AgeCostChart,
@@ -253,6 +254,21 @@ export default function DashboardPage() {
                   </Section>
                 )}
 
+                {data.branch_compare.length > 1 && (
+                  <Section
+                    title="เทียบบริษัท/สาขา"
+                    description={`${noun}ในตัวกรองนี้แยกตามบริษัท · ต้นทุนซ่อม/ชม. = ค่าซ่อมรวม ÷ ชั่วโมงทำงานรวมของบริษัท`}
+                  >
+                    <BranchCompare
+                      data={data.branch_compare}
+                      onSelectBranch={(id) => {
+                        const c = me.companies.find((x) => x.id === id);
+                        if (c) params.selectCompany(c.code);
+                      }}
+                    />
+                  </Section>
+                )}
+
                 {selectedCar && (
                   <Section
                     title="เทียบกับรุ่นเดียวกัน"
@@ -295,7 +311,7 @@ export default function DashboardPage() {
 
                 <Section
                   title="การเสียและเวลาซ่อม"
-                  description="นับจากใบแจ้งซ่อมประเภทซ่อม"
+                  description="นับจากใบแจ้งซ่อมประเภทซ่อม · PM = ใบแจ้งซ่อมประเภททำ PM · Downtime = เวลาตั้งแต่แจ้งซ่อมจนปิดงาน"
                 >
                   <Reliability data={data.reliability} />
                 </Section>
@@ -308,10 +324,7 @@ export default function DashboardPage() {
                       : "จากใบจ่ายสินค้าภายใน-อะไหล่ ที่อ้างอิงเลขที่ใบแจ้งซ่อม"
                   }
                 >
-                  <PartsSummary
-                    data={data.parts}
-                    carSelected={Boolean(selectedCar)}
-                  />
+                  <PartsSummary data={data.parts} />
                 </Section>
 
                 <Section title="ค่าใช้จ่ายซ่อมบำรุง">

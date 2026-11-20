@@ -135,6 +135,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/car-history/{car_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ประวัติรถรายคัน (หน้า /car/:car_id) — ทุกช่วงที่ sync มา ไม่กรองปี */
+        get: operations["car_history_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/car-types/": {
         parameters: {
             query?: never;
@@ -299,6 +316,24 @@ export interface components {
             /** Format: double */
             percent_ma: number | null;
         };
+        BranchCompare: {
+            branch_company_id: string;
+            branch_company_name: string;
+            car_count: number;
+            /** Format: double */
+            repair_total: number;
+            /** Format: double */
+            work_total: number;
+            /** Format: double */
+            repair_cost_per_hr: number | null;
+            /** Format: double */
+            percent_ma: number | null;
+            failure_count: number;
+            /** Format: double */
+            mtbf: number | null;
+            /** Format: double */
+            downtime_hours: number;
+        };
         Car: {
             readonly id: number;
             code?: string | null;
@@ -319,6 +354,99 @@ export interface components {
             readonly id: number;
             /** ชื่อแผนกทะเบียนรถ/เครื่องจักร/หน่วยงาน */
             name: string;
+        };
+        CarHistory: {
+            car: components["schemas"]["CarHistoryCar"];
+            totals: components["schemas"]["CarHistoryTotals"];
+            monthly: components["schemas"]["CarHistoryMonthly"];
+            /** @description ค่าซ่อมรายเดือนแยกตามระบบ ใหม่ -> เก่า */
+            repair_items: components["schemas"]["CarHistoryRepairItem"][];
+            tickets: components["schemas"]["CarHistoryTicket"][];
+            /** @description การซ่อมจากใบจ่ายอะไหล่ของรถที่ไม่มีใบแจ้งซ่อม ใหม่ -> เก่า */
+            doc_jobs: components["schemas"]["CarHistoryDocJob"][];
+        };
+        CarHistoryCar: {
+            car_id: number;
+            code: string;
+            name: string | null;
+            brand: string | null;
+            car_model: string | null;
+            start_year: number | null;
+            age: number | null;
+            car_type_name: string | null;
+            car_dep_id: number | null;
+            car_dep_name: string | null;
+            unit_noun: string;
+            branch_company_id: string;
+            branch_company_name: string;
+        };
+        CarHistoryDocJob: {
+            /** @description เลขที่ใบจ่ายอะไหล่ (หลายใบคั่นด้วย , ) */
+            ref_no: string;
+            /** Format: date */
+            docdat: string;
+            is_pm: boolean;
+            /** Format: double */
+            amount: number;
+            parts: components["schemas"]["Part"][];
+        };
+        CarHistoryMonthly: {
+            labels: string[];
+            repair: number[];
+            work: number[];
+            breakdowns: number[];
+            pm: number[];
+        };
+        CarHistoryRepairItem: {
+            year: number;
+            month: number;
+            label: string;
+            repair_name: string;
+            /** Format: double */
+            amount: number;
+        };
+        CarHistoryTicket: {
+            ext_id: number;
+            ref_no: string;
+            /** Format: date-time */
+            reported_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            ma_type: string;
+            ma_type_name: string;
+            broke_reason: string;
+            car_state: string;
+            is_open: boolean;
+            stage_label: string;
+            /** Format: double */
+            repair_hours: number | null;
+            /** @description อะไหล่จากใบจ่ายสินค้าภายในที่อ้างอิงใบนี้ */
+            parts: components["schemas"]["Part"][];
+            /** Format: double */
+            parts_amount: number;
+            parts_count: number;
+        };
+        CarHistoryTotals: {
+            /** Format: double */
+            repair_total: number;
+            /** Format: double */
+            work_total: number;
+            /** Format: double */
+            repair_cost_per_hr: number | null;
+            ticket_count: number;
+            breakdown_count: number;
+            /** @description ส่วนของ breakdown_count ที่นับจากใบจ่ายอะไหล่ (รถไม่มีใบแจ้งซ่อม) */
+            doc_breakdown_count: number;
+            /** @description ส่วนของ pm_count ที่นับจากใบจ่ายอะไหล่ประเภท PM (รถไม่มีใบแจ้งซ่อม) */
+            doc_pm_count: number;
+            pm_count: number;
+            open_count: number;
+            /** Format: double */
+            downtime_hours: number;
+            /** Format: double */
+            parts_total: number;
+            /** @description เดือนแรกที่มีข้อมูล */
+            data_from: string | null;
         };
         CarRow: {
             car_id: number;
@@ -360,6 +488,11 @@ export interface components {
             mtbf: number | null;
             /** Format: double */
             mttr: number | null;
+            /**
+             * Format: double
+             * @description ชั่วโมงหยุดซ่อมรวม (ใบซ่อมที่ปิดงานแล้ว)
+             */
+            downtime_hours: number;
         };
         CarSeriesChart: {
             labels: string[];
@@ -399,6 +532,11 @@ export interface components {
             mtbf: number | null;
             /** Format: double */
             mttr: number | null;
+            /**
+             * Format: double
+             * @description ชั่วโมงหยุดซ่อมรวม (ใบซ่อมที่ปิดงานแล้ว)
+             */
+            downtime_hours: number;
         };
         CarType: {
             readonly id: number;
@@ -457,6 +595,8 @@ export interface components {
             jobs: components["schemas"]["Jobs"];
             watchlist: components["schemas"]["Watchlist"];
             model_comparison: components["schemas"]["ModelComparison"];
+            /** @description ว่าง = ดูบริษัทเดียวหรือเลือกรถคันเดียว */
+            branch_compare: components["schemas"]["BranchCompare"][];
             /** @description null = ไม่ได้เลือกรถ หรือรถคันนี้ยังไม่ได้กรอกยี่ห้อ */
             model_benchmark: components["schemas"]["ModelBenchmark"] | null;
             compare: components["schemas"]["Compare"];
@@ -737,23 +877,14 @@ export interface components {
         Parts: {
             job_count: number;
             jobs_with_parts: number;
+            doc_count: number;
+            /** Format: double */
+            doc_amount: number;
             /** Format: double */
             amount: number;
             /** Format: double */
             amount_per_job: number | null;
             top: components["schemas"]["TopPart"][];
-            jobs: components["schemas"]["PartsJob"][];
-        };
-        PartsJob: {
-            ext_id: number;
-            ref_no: string;
-            /** Format: date-time */
-            reported_at: string;
-            broke_reason: string;
-            closed: boolean;
-            /** Format: double */
-            amount: number;
-            parts: components["schemas"]["Part"][];
         };
         PasswordResetConfirmRequest: {
             uid: string;
@@ -766,6 +897,10 @@ export interface components {
         };
         Reliability: {
             failure_count: number;
+            /** @description ส่วนของ failure_count ที่นับจากใบจ่ายอะไหล่ (รถที่ไม่มีใบแจ้งซ่อม) */
+            doc_failure_count: number;
+            /** @description ส่วนของ pm_count ที่นับจากใบจ่ายอะไหล่ประเภท PM (รถที่ไม่มีใบแจ้งซ่อม) */
+            doc_pm_count: number;
             repair_closed: number;
             /** Format: double */
             mtbf: number | null;
@@ -773,13 +908,28 @@ export interface components {
             mttr: number | null;
             /** Format: double */
             availability: number | null;
+            /**
+             * Format: double
+             * @description ชั่วโมงหยุดซ่อมรวม (ใบซ่อมที่ปิดงานแล้ว)
+             */
+            downtime_hours: number;
+            pm_count: number;
+            /**
+             * Format: double
+             * @description % PM ในงาน PM + ซ่อม
+             */
+            pm_ratio: number | null;
             trend: components["schemas"]["ReliabilityTrend"];
             top_cars: components["schemas"]["TopCars"];
+            top_downtime: components["schemas"]["TopDowntime"];
         };
         ReliabilityTrend: {
             labels: string[];
             count: number[];
             mttr: (number | null)[];
+            /** @description ใบ PM ต่อเดือน */
+            pm: number[];
+            downtime: number[];
         };
         RepairVsWorkChart: {
             labels: string[];
@@ -824,6 +974,11 @@ export interface components {
             labels: string[];
             companies: string[];
             count: number[];
+        };
+        TopDowntime: {
+            labels: string[];
+            companies: string[];
+            hours: number[];
         };
         TopPart: {
             stkcod: string;
@@ -1095,6 +1250,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CarDepartment"];
+                };
+            };
+        };
+    };
+    car_history_retrieve: {
+        parameters: {
+            query: {
+                branch_company_id: string;
+            };
+            header?: never;
+            path: {
+                car_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CarHistory"];
                 };
             };
         };
