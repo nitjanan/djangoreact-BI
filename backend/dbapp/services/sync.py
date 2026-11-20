@@ -19,6 +19,7 @@ from dbapp.models import (
     BaseCarType,
     BaseRepairType,
     SummaryCarDep,
+    SummaryCarJob,
     SummaryMaintenance,
     SummaryMaintenancePart,
     SummaryOil,
@@ -61,6 +62,9 @@ def _sync_simple_base(model, path, build_defaults):
     return True
 
 
+CAR_DETAIL_FIELDS = ("start_year", "brand", "car_model")
+
+
 def sync_base_data():
     # summary มี FK ไป base ต้องโหลด base ก่อนเสมอ
     return {
@@ -81,6 +85,8 @@ def sync_base_data():
                 "name": i["name"],
                 "car_dep_id": i["car_dep"],
                 "car_type_id": i["car_type"],
+                # webstock รุ่นเก่ายังไม่ส่ง 3 ช่องนี้ ถ้าไม่มี key ให้คงค่าเดิมไว้ ไม่เขียนทับเป็นค่าว่าง
+                **{f: i[f] for f in CAR_DETAIL_FIELDS if f in i},
             },
         ),
     }
@@ -214,6 +220,41 @@ def sync_work(start_date, end_date):
 
 
 @transaction.atomic
+def sync_car_jobs(start_date, end_date):
+    """งานจากบันทึกการใช้รถ: ชั่วโมงทำงาน/ระยะทาง แยกแผนกค่าใช้จ่ายและรายละเอียดงาน"""
+    base_url = settings.CARLOG_JOBS_API_BASE or get_base_url()
+    data = get_api_data(
+        f"{base_url}/all/carlog/jobs/api/between/{start_date}/{end_date}/", base_url
+    )
+    if not data:
+        return False
+
+    _delete_range(SummaryCarJob, start_date, end_date)
+    SummaryCarJob.objects.bulk_create(
+        [
+            SummaryCarJob(
+                summary_date=_month_start(item),
+                year=item["year"],
+                month=item["month"],
+                branch_company_id=item["branch_company"],
+                car_dep_id=item["car_dep"],
+                car_id=item["car_id"],
+                expense_dept_id=item["expense_dept_id"],
+                expense_dept_name=item["expense_dept_name"],
+                job=(item["job"] or "")[:255],
+                hours=item["hours"],
+                km=item["km"],
+                trips=item["trips"],
+                days=item["days"],
+            )
+            for item in data
+        ],
+        batch_size=1000,
+    )
+    return True
+
+
+@transaction.atomic
 def sync_maintenance(today=None):
     today = today or date.today()
     # ย้อนไปต้นปีก่อนหน้า เผื่อใบแจ้งซ่อมที่ซ่อมข้ามปี
@@ -334,6 +375,7 @@ def sync_summary(start_date, end_date):
         "repair": _safe_step("repair", sync_repair, start_date, end_date),
         "oil": _safe_step("oil", sync_oil, start_date, end_date),
         "work": _safe_step("work", sync_work, start_date, end_date),
+        "car_jobs": _safe_step("car_jobs", sync_car_jobs, start_date, end_date),
         "maintenance": _safe_step("maintenance", sync_maintenance),
         "unmatched": _safe_step("unmatched", sync_unmatched, start_date, end_date),
     }

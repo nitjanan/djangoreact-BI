@@ -11,6 +11,7 @@ from dbapp.models import (
     BaseCarDepartment,
     BaseCarType,
     BaseVisible,
+    SummaryCarJob,
     SummaryMaintenance,
     SummaryOil,
     SummaryRepair,
@@ -186,6 +187,65 @@ def test_sync_requires_superuser(client, data, monkeypatch):
     assert res.json()["status"] == "ok"
 
 
+def test_sync_without_webstock_config_explains_instead_of_500(client, data):
+    # ไม่มี BaseAPI "webstock" -> บอกให้ไปตั้งค่า แทน error 500 ที่ไม่บอกอะไร
+    data["user"].is_superuser = True
+    data["user"].save()
+    res = client.post("/api/sync/")
+    assert res.status_code == 503
+    assert "webstock" in res.json()["detail"]
+
+
+def test_car_table_shows_start_year_brand_and_model(client):
+    BaseCar.objects.filter(id=1).update(start_year=2019, brand="SANY", car_model="SY215C")
+    rows = {r["code"]: r for r in dashboard(client, company="ALL").json()["car_table"]["rows"]}
+    assert rows["CAR1"]["age"] == YEAR - 2019
+    assert rows["CAR2"]["age"] is None
+    assert rows["CAR1"]["car_type_name"] == "รถบรรทุก"
+    assert (rows["CAR1"]["start_year"], rows["CAR1"]["brand"], rows["CAR1"]["car_model"]) == (
+        2019,
+        "SANY",
+        "SY215C",
+    )
+    assert (rows["CAR2"]["start_year"], rows["CAR2"]["brand"], rows["CAR2"]["car_model"]) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_sync_base_car_copies_start_year_brand_and_model(db, monkeypatch):
+    from dbapp.services import sync
+
+    cars = [
+        {"id": 7, "code": "S20", "name": "รถจีน9", "car_dep": None, "car_type": None,
+         "start_year": 2019, "brand": "SANY", "car_model": "SY215C"},
+        # webstock ที่ยังไม่ได้อัปเดตไม่มี 3 ช่องนี้
+        {"id": 8, "code": "S21", "name": "รถจีน10", "car_dep": None, "car_type": None},
+    ]  # fmt: skip
+    monkeypatch.setattr(sync, "get_base_url", lambda: "")
+    monkeypatch.setattr(
+        sync, "get_api_data", lambda url: cars if url == "/exp/basecar/api/" else []
+    )
+
+    assert sync.sync_base_data()["car"] is True
+    car = BaseCar.objects.get(id=7)
+    assert (car.start_year, car.brand, car.car_model) == (2019, "SANY", "SY215C")
+    assert BaseCar.objects.get(id=8).brand is None
+
+    # sync ซ้ำจาก webstock ที่ยังไม่ส่ง 3 ช่องนี้ ต้องไม่ล้างค่าเดิม แต่ยังอัปเดตช่องอื่น
+    cars[:] = [{"id": 7, "code": "S20", "name": "รถจีน9 ใหม่", "car_dep": None, "car_type": None}]
+    assert sync.sync_base_data()["car"] is True
+    car = BaseCar.objects.get(id=7)
+    assert car.name == "รถจีน9 ใหม่"
+    assert (car.start_year, car.brand, car.car_model) == (2019, "SANY", "SY215C")
+
+    # ส่ง key มาเป็น null = ตั้งใจล้างค่า
+    cars[:] = [{**cars[0], "start_year": None, "brand": None, "car_model": None}]
+    sync.sync_base_data()
+    assert BaseCar.objects.get(id=7).brand is None
+
+
 def test_sync_summary_continues_after_failed_step(monkeypatch):
     from dbapp.services import sync
 
@@ -198,6 +258,7 @@ def test_sync_summary_continues_after_failed_step(monkeypatch):
     monkeypatch.setattr(sync, "sync_work", lambda *a: False)
     monkeypatch.setattr(sync, "sync_maintenance", lambda *a: True)
     monkeypatch.setattr(sync, "sync_unmatched", lambda *a: True)
+    monkeypatch.setattr(sync, "sync_car_jobs", lambda *a: True)
 
     result = sync.sync_summary(None, None)
     assert result == {
@@ -205,6 +266,7 @@ def test_sync_summary_continues_after_failed_step(monkeypatch):
         "repair": False,
         "oil": True,
         "work": False,
+        "car_jobs": True,
         "maintenance": True,
         "unmatched": True,
     }
@@ -259,3 +321,160 @@ def test_repair_hours_handles_buddhist_year_and_typos():
     assert repair_hours(reported, datetime(2599, 9, 25, 13, 0)) is None
     assert repair_hours(reported, datetime(2026, 9, 25, 9, 0)) is None
     assert repair_hours(reported, None) is None
+
+
+def _repair(company_id, car_id, amount, year=YEAR, month=1):
+    SummaryRepair.objects.create(
+        branch_company_id=company_id, car_id=car_id, car_dep_id=1, year=year, month=month,
+        month_th="", summary_date=date(year, month, 1), repair_name="ช่วงล่าง", amount=amount,
+    )  # fmt: skip
+
+
+def test_dashboard_month_range(client):
+    _repair("01", 1, 300, month=3)
+    full = dashboard(client, company="ALL").json()
+    assert full["charts"]["repair_by_type"]["total"] == 1800
+
+    body = dashboard(client, company="ALL", month_from=3, month_to=3).json()
+    assert (body["filters"]["month_from"], body["filters"]["month_to"]) == (3, 3)
+    assert body["charts"]["repair_by_type"]["total"] == 300
+    assert body["car_table"]["totals"]["repair_total"] == 300
+    assert body["charts"]["repair_vs_work"]["labels"] == ["มีนาคม"]
+    assert body["reliability"]["failure_count"] == 0  # ใบแจ้งซ่อมอยู่เดือน ม.ค.
+
+
+def test_dashboard_month_range_start_after_end_is_clamped(client):
+    body = dashboard(client, company="ALL", month_from=5, month_to=2).json()
+    assert (body["filters"]["month_from"], body["filters"]["month_to"]) == (2, 2)
+
+
+def test_dashboard_compares_with_same_months_last_year(client):
+    _repair("01", 1, 400, year=YEAR - 1)
+    _repair("01", 1, 9000, year=YEAR - 1, month=6)  # นอกช่วงที่เลือก
+    _repair("09", 1, 7777, year=YEAR - 1)  # บริษัทที่มองไม่เห็น
+
+    body = dashboard(client, company="ALL", month_from=1, month_to=3).json()
+    compare = body["compare"]
+    assert (compare["year"], compare["month_from"], compare["month_to"]) == (YEAR - 1, 1, 3)
+    assert compare["has_data"] is True
+    assert compare["repair_total"] == 400
+    assert compare["totals"]["repair_total"] == 400
+
+    # บริษัทที่ไม่มีข้อมูลปีก่อน
+    empty = dashboard(client, company="C02", month_from=1, month_to=3).json()["compare"]
+    assert empty["has_data"] is False
+    assert empty["totals"] is None
+
+
+def test_dashboard_unit_noun_is_department_name(client):
+    assert dashboard(client, company="ALL").json()["filters"]["unit_noun"] == "แผนกรถ"
+    other = dashboard(client, company="ALL", car_dep=0).json()["filters"]["unit_noun"]
+    assert other == "รถ/เครื่องจักร"
+
+
+def test_dashboard_last_synced_at_is_latest_summary_row(client):
+    body = dashboard(client, company="ALL").json()
+    latest = max(
+        SummaryRepair.objects.latest("created_at").created_at,
+        SummaryMaintenance.objects.latest("created_at").created_at,
+    )
+    assert body["last_synced_at"] == latest.isoformat()
+
+
+def test_truck_department_uses_liters_per_km(client):
+    truck = BaseCarDepartment.objects.create(id=2, name="รถบรรทุก")
+    co1 = BaseBranchCompany.objects.get(id="01")
+    t1 = BaseCar.objects.create(id=10, code="T1", name="รถบรรทุก 1", car_dep=truck)
+
+    def oil(month, liters, km):
+        SummaryOil.objects.create(
+            branch_company=co1, car=t1, car_dep=truck, year=YEAR, month=month,
+            month_th="", summary_date=date(YEAR, month, 1), sum_liter=liters, sum_km=km,
+        )  # fmt: skip
+
+    oil(1, 300, 1000)
+    oil(2, 200, 1000)
+    oil(3, 900, 0)  # เติมน้ำมันแต่ไม่ได้บันทึกไมล์ -> ไม่นับใน ลิตร/กม.
+
+    body = dashboard(client, company="ALL", car_dep=2).json()
+    assert (body["filters"]["fuel_field"], body["filters"]["fuel_unit"]) == (
+        "liter_per_km",
+        "ลิตร/กม.",
+    )
+    [row] = body["car_table"]["rows"]
+    assert (row["oil_total"], row["km_total"], row["liter_per_km"]) == (1400, 2000, 0.25)
+    assert body["car_table"]["totals"]["liter_per_km"] == 0.25
+
+    # แท็บอื่นๆ (มีเครื่องจักรปน) ยังเทียบเป็น ลิตร/ชม.
+    other = dashboard(client, company="ALL", car_dep=0).json()["filters"]
+    assert (other["fuel_field"], other["fuel_unit"]) == ("fuel_rate", "ลิตร/ชม.")
+
+
+def test_truck_hours_come_from_carlog_jobs_and_summarise_by_expense_department(client):
+    truck = BaseCarDepartment.objects.create(id=2, name="รถบรรทุก")
+    co1 = BaseBranchCompany.objects.get(id="01")
+    t1 = BaseCar.objects.create(id=10, code="T1", name="รถบรรทุก 1", car_dep=truck)
+    t2 = BaseCar.objects.create(id=11, code="T2", name="รถบรรทุก 2", car_dep=truck)
+    common = dict(branch_company=co1, car_dep=truck, year=YEAR, month=1,
+                  summary_date=date(YEAR, 1, 1))  # fmt: skip
+    # เลขไมล์ 500 กม. ไม่ใช่ชั่วโมง -> ไม่ใช้เป็นชั่วโมงทำงานแล้ว แต่ยังใช้นับวัน
+    SummaryWork.objects.create(**common, car=t1, sum_diff_mile=500, count_diff_time=2)
+
+    def job(car, dept, name, hours, km=0, trips=1):
+        SummaryCarJob.objects.create(
+            **common, car=car, expense_dept_id=dept and dept[:2], expense_dept_name=dept,
+            job=name, hours=hours, km=km, trips=trips, days=trips,
+        )  # fmt: skip
+
+    job(t1, "โรงโม่ 1", "หินใหญ่-เข้าโม่", 10, km=40, trips=2)
+    job(t2, "โรงโม่ 1", "หินใหญ่-เข้าโม่", 4)
+    job(t1, "เปิดหน้าดิน", "บรรทุกดิน", 2)
+    job(t1, None, "วางบิล", 1)
+
+    body = dashboard(client, company="ALL", car_dep=2).json()
+    rows = {r["code"]: r for r in body["car_table"]["rows"]}
+    assert rows["T1"]["work_total"] == 13
+    assert rows["T1"]["percent_ma"] == 13 / (2 * 8) * 100  # มาตรฐาน 8 ชม./วัน
+    assert rows["T2"]["work_total"] == 4
+    assert body["charts"]["work_by_month"]["hours"][0] == 17
+
+    jobs = body["jobs"]
+    assert (jobs["hours"], jobs["km"], jobs["trips"]) == (17, 40, 5)
+    names = [d["name"] for d in jobs["departments"]]
+    assert names == ["โรงโม่ 1", "เปิดหน้าดิน", "ไม่ระบุแผนกค่าใช้จ่าย"]  # ไม่ระบุอยู่ท้าย
+    crusher = jobs["departments"][0]
+    assert (crusher["hours"], crusher["trips"], crusher["cars"]) == (14, 3, 2)
+    assert crusher["jobs"] == [{"job": "หินใหญ่-เข้าโม่", "hours": 14, "km": 40, "trips": 3, "cars": 2}]
+
+    # เลือกรถคันเดียว: เห็นเฉพาะงานของคันนั้น
+    one = dashboard(client, company="ALL", car_dep=2, car_id=11, branch_company_id="01").json()
+    assert one["jobs"]["hours"] == 4
+
+
+def test_dashboard_years_only_from_visible_companies(client):
+    _repair("01", 1, 1, year=2024)
+    _repair("09", 1, 1, year=2019)
+    years = dashboard(client, company="ALL").json()["filters"]["years"]
+    assert {date.today().year, YEAR} <= set(years)
+    assert 2024 in years
+    assert 2019 not in years
+    assert years == sorted(years, reverse=True)
+
+
+def test_sync_car_jobs_uses_carlog_jobs_api_base(db, settings, monkeypatch):
+    from dbapp.services import sync
+
+    settings.CARLOG_JOBS_API_BASE = "http://local-webstock"
+    calls = []
+    monkeypatch.setattr(sync, "get_base_url", lambda: "http://prod")
+    monkeypatch.setattr(
+        sync, "get_api_data", lambda url, base_url=None: calls.append((url, base_url)) or []
+    )
+
+    sync.sync_car_jobs(date(YEAR, 1, 1), date(YEAR, 1, 31))
+    assert calls == [
+        (
+            f"http://local-webstock/all/carlog/jobs/api/between/{YEAR}-01-01/{YEAR}-01-31/",
+            "http://local-webstock",
+        )
+    ]

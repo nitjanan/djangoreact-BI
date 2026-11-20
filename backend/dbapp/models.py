@@ -148,6 +148,11 @@ class BaseCar(models.Model):
     car_type = models.ForeignKey(
         BaseCarType, on_delete=models.CASCADE, null=True, blank=True, verbose_name="ชนิดรถ/เครื่องจักร"
     )
+    start_year = models.PositiveSmallIntegerField(
+        blank=True, null=True, verbose_name="ปีที่เริ่มใช้งาน (ค.ศ.)"
+    )
+    brand = models.CharField(max_length=100, blank=True, null=True, verbose_name="ยี่ห้อ")
+    car_model = models.CharField(max_length=100, blank=True, null=True, verbose_name="รุ่น")
 
     class Meta:
         db_table = "BaseCar"
@@ -344,6 +349,45 @@ class SummaryWork(models.Model):
 
     def __str__(self):
         return f"{self.year}-{self.month}:{self.car}"
+
+
+class SummaryCarJob(models.Model):
+    """งานจากบันทึกการใช้รถ (webstock CarLogbook) รวมต่อเดือน/รถ/แผนกค่าใช้จ่าย/รายละเอียดงาน
+
+    รถบรรทุก/ยานพาหนะใช้ hours เป็นชั่วโมงทำงาน (เครื่องจักรใช้หน้าปัดชั่วโมงใน SummaryWork)
+    """
+
+    summary_date = models.DateField(db_index=True)
+    year = models.IntegerField()
+    month = models.IntegerField()
+
+    branch_company = models.ForeignKey(
+        BaseBranchCompany, on_delete=models.CASCADE, null=True, blank=True
+    )
+    car_dep = models.ForeignKey(BaseCarDepartment, on_delete=models.PROTECT, null=True, blank=True)
+    car = models.ForeignKey(BaseCar, on_delete=models.PROTECT, null=True, blank=True)
+
+    expense_dept_id = models.CharField(max_length=255, null=True, blank=True)
+    expense_dept_name = models.CharField(
+        max_length=255, null=True, blank=True, verbose_name="แผนกค่าใช้จ่าย"
+    )
+    job = models.CharField(max_length=255, blank=True, default="", verbose_name="รายละเอียดงาน")
+    hours = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    km = models.DecimalField(max_digits=15, decimal_places=2, default=0)
+    trips = models.IntegerField(default=0, verbose_name="จำนวนครั้ง")
+    days = models.IntegerField(default=0, verbose_name="จำนวนวัน")
+
+    v_stamp = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "sum_car_job"
+        ordering = ("summary_date", "car_id")
+        verbose_name = "สรุปงานจากบันทึกการใช้รถ"
+        verbose_name_plural = "สรุปงานจากบันทึกการใช้รถ"
+
+    def __str__(self):
+        return f"{self.summary_date} {self.car_id} {self.job}"
 
 
 class SummaryMaintenance(models.Model):

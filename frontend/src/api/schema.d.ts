@@ -266,6 +266,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        BenchmarkMetrics: {
+            cars: number;
+            /** Format: double */
+            avg_age: number | null;
+            /** Format: double */
+            repair_cost_per_hr: number | null;
+            /**
+             * Format: double
+             * @description หน่วยตาม filters.fuel_unit
+             */
+            fuel: number | null;
+            /** Format: double */
+            mtbf: number | null;
+            /** Format: double */
+            percent_ma: number | null;
+        };
         Car: {
             readonly id: number;
             code?: string | null;
@@ -275,6 +291,12 @@ export interface components {
             car_dep?: number | null;
             /** ชนิดรถ/เครื่องจักร */
             car_type?: number | null;
+            /** ปีที่เริ่มใช้งาน (ค.ศ.) */
+            start_year?: number | null;
+            /** ยี่ห้อ */
+            brand?: string | null;
+            /** รุ่น */
+            car_model?: string | null;
         };
         CarDepartment: {
             readonly id: number;
@@ -287,6 +309,14 @@ export interface components {
             branch_company_name: string;
             code: string;
             name: string | null;
+            /** @description ปีที่เริ่มใช้งาน (ค.ศ.) */
+            start_year: number | null;
+            brand: string | null;
+            car_model: string | null;
+            /** @description อายุ (ปี) ณ ปีที่เลือก */
+            age: number | null;
+            car_type_id: number | null;
+            car_type_name: string | null;
             /** Format: double */
             percent_ma: number;
             /** Format: double */
@@ -297,6 +327,13 @@ export interface components {
             oil_total: number;
             /** Format: double */
             fuel_rate: number;
+            /**
+             * Format: double
+             * @description กม. จากเลขไมล์ในเดือนที่เติมน้ำมัน
+             */
+            km_total: number;
+            /** Format: double */
+            liter_per_km: number;
             /** Format: double */
             repair_total: number;
             /** Format: double */
@@ -329,6 +366,13 @@ export interface components {
             oil_total: number;
             /** Format: double */
             fuel_rate: number;
+            /**
+             * Format: double
+             * @description กม. จากเลขไมล์ในเดือนที่เติมน้ำมัน
+             */
+            km_total: number;
+            /** Format: double */
+            liter_per_km: number;
             /** Format: double */
             repair_total: number;
             /** Format: double */
@@ -357,12 +401,13 @@ export interface components {
         /**
          * @description * `stale` - stale
          *     * `cost` - cost
+         *     * `replace` - replace
          *     * `repeat` - repeat
          *     * `failure` - failure
          *     * `fuel` - fuel
          * @enum {string}
          */
-        CodeEnum: "stale" | "cost" | "repeat" | "failure" | "fuel";
+        CodeEnum: "stale" | "cost" | "replace" | "repeat" | "failure" | "fuel";
         Company: {
             /** รหัสสาขาบริษัท */
             id: string;
@@ -371,6 +416,16 @@ export interface components {
             /** ชื่อสาขาบริษัท */
             name?: string | null;
             affiliated_name_sh?: string | null;
+        };
+        /** @description ช่วงเดียวกันของปีก่อน */
+        Compare: {
+            year: number;
+            month_from: number;
+            month_to: number;
+            has_data: boolean;
+            /** Format: double */
+            repair_total: number;
+            totals: components["schemas"]["CarTotals"] | null;
         };
         Dashboard: {
             filters: components["schemas"]["DashboardFilters"];
@@ -382,13 +437,36 @@ export interface components {
             unmatched: components["schemas"]["Unmatched"];
             open_jobs: components["schemas"]["OpenJobs"];
             parts: components["schemas"]["Parts"];
+            jobs: components["schemas"]["Jobs"];
             watchlist: components["schemas"]["Watchlist"];
+            model_comparison: components["schemas"]["ModelComparison"];
+            /** @description null = ไม่ได้เลือกรถ หรือรถคันนี้ยังไม่ได้กรอกยี่ห้อ */
+            model_benchmark: components["schemas"]["ModelBenchmark"] | null;
+            compare: components["schemas"]["Compare"];
             insights: components["schemas"]["Insights"];
+            /**
+             * Format: date-time
+             * @description เวลาที่อัปเดตข้อมูลจาก webstock ครั้งล่าสุด
+             */
+            last_synced_at: string | null;
         };
         DashboardFilters: {
             company: string;
             year: number;
+            month_from: number;
+            month_to: number;
+            years: number[];
             car_dep: number;
+            /**
+             * @description ค่าที่ใช้เป็นอัตราการใช้น้ำมันของแผนกนี้ (รถบรรทุก = ลิตร/กม.)
+             *
+             *     * `fuel_rate` - fuel_rate
+             *     * `liter_per_km` - liter_per_km
+             */
+            fuel_field: components["schemas"]["FuelFieldEnum"];
+            fuel_unit: string;
+            /** @description ชื่อแผนกที่เลือก ใช้แทนคำว่า รถ บนหน้าเว็บ */
+            unit_noun: string;
             car_type: number | null;
             car_id: number | null;
             branch_company_id: string | null;
@@ -396,6 +474,12 @@ export interface components {
         Detail: {
             detail: string;
         };
+        /**
+         * @description * `fuel_rate` - fuel_rate
+         *     * `liter_per_km` - liter_per_km
+         * @enum {string}
+         */
+        FuelFieldEnum: "fuel_rate" | "liter_per_km";
         HeatmapChart: {
             labels: string[];
             rows: components["schemas"]["HeatmapRow"][];
@@ -403,7 +487,26 @@ export interface components {
         HeatmapRow: {
             name: string;
             company: string;
+            car_id: number | null;
+            branch_company_id: string | null;
             data: number[];
+        };
+        InsightCar: {
+            name: string;
+            company: string;
+            value: string;
+            target: components["schemas"]["InsightTarget"] | null;
+        };
+        /** @description ตัวเลข 2 ค่าแสดงคู่กัน: ค่าที่ผิดปกติ vs ค่าปกติ */
+        InsightCompare: {
+            /** Format: double */
+            value: number;
+            /** Format: double */
+            baseline: number;
+            value_text: string;
+            baseline_text: string;
+            value_label: string;
+            baseline_label: string;
         };
         InsightItem: {
             severity: components["schemas"]["SeverityEnum"];
@@ -412,14 +515,48 @@ export interface components {
             detail: string;
             target: components["schemas"]["InsightTarget"] | null;
             action: string | null;
+            compare: components["schemas"]["InsightCompare"] | null;
+            cars: components["schemas"]["InsightCar"][];
+            points: string[];
+            hint: string;
         };
         InsightTarget: {
             car_id: number;
             branch_company_id: string;
         };
         Insights: {
-            overview: string[];
+            overview: components["schemas"]["OverviewFact"][];
             items: components["schemas"]["InsightItem"][];
+        };
+        JobDepartment: {
+            name: string;
+            /** @description false = ไม่ได้ระบุแผนกค่าใช้จ่ายในบันทึก */
+            assigned: boolean;
+            /** Format: double */
+            hours: number;
+            /** Format: double */
+            km: number;
+            trips: number;
+            cars: number;
+            jobs: components["schemas"]["JobItem"][];
+        };
+        JobItem: {
+            job: string;
+            /** Format: double */
+            hours: number;
+            /** Format: double */
+            km: number;
+            trips: number;
+            cars: number;
+        };
+        /** @description งานที่ทำจากบันทึกการใช้รถ แยกตามแผนกค่าใช้จ่าย */
+        Jobs: {
+            /** Format: double */
+            hours: number;
+            /** Format: double */
+            km: number;
+            trips: number;
+            departments: components["schemas"]["JobDepartment"][];
         };
         /**
          * @description * `urgent` - urgent
@@ -441,6 +578,68 @@ export interface components {
             visible_tabs: string[];
             default_company: string | null;
         };
+        /** @description รถที่เลือก เทียบกับคันอื่นรุ่นเดียวกัน / ชนิดเดียวกัน (ไม่รวมคันนี้) */
+        ModelBenchmark: {
+            brand: string;
+            car_model: string | null;
+            car_type_name: string;
+            car: components["schemas"]["BenchmarkMetrics"];
+            /** @description null = ไม่มีคันอื่นรุ่นนี้ */
+            model: components["schemas"]["BenchmarkMetrics"] | null;
+            type: components["schemas"]["BenchmarkMetrics"] | null;
+        };
+        /** @description เทียบยี่ห้อ/รุ่นภายในชนิดรถเดียวกัน */
+        ModelComparison: {
+            rows: components["schemas"]["ModelComparisonRow"][];
+            /** @description รุ่นที่มีรถน้อยกว่านี้ยังสรุปไม่ได้ */
+            min_cars: number;
+            total_cars: number;
+            /** @description คันที่ยังไม่ได้กรอกยี่ห้อใน webstock */
+            missing_cars: number;
+        };
+        ModelComparisonRow: {
+            car_type_id: number | null;
+            car_type_name: string;
+            brand: string;
+            car_model: string | null;
+            cars: number;
+            /**
+             * Format: double
+             * @description เฉลี่ยเฉพาะคันที่รู้ปีที่เริ่มใช้งาน
+             */
+            avg_age: number | null;
+            /**
+             * Format: double
+             * @description ชั่วโมงรวมของคันที่ชั่วโมง > 0 (ใช้คิดค่าต่อชั่วโมง)
+             */
+            work_total: number;
+            /** Format: double */
+            repair_total: number;
+            /** Format: double */
+            repair_cost_per_hr: number | null;
+            /**
+             * Format: double
+             * @description ต้นทุนซ่อม/ชม. ของทั้งชนิดรถนี้ (รวมคันที่ไม่ได้กรอกยี่ห้อ)
+             */
+            type_repair_cost_per_hr: number | null;
+            /**
+             * Format: double
+             * @description ต้นทุนซ่อม/ชม. ของรุ่นนี้ ÷ ของทั้งชนิดรถ (1 = เท่ากัน)
+             */
+            vs_type: number | null;
+            /**
+             * Format: double
+             * @description หน่วยตาม filters.fuel_unit
+             */
+            fuel: number | null;
+            failure_count: number;
+            /** Format: double */
+            mtbf: number | null;
+            /** Format: double */
+            percent_ma: number | null;
+        };
+        /** @enum {unknown} */
+        NullEnum: null;
         OilChart: {
             labels: string[];
             liters: number[];
@@ -493,6 +692,18 @@ export interface components {
             buckets: components["schemas"]["OpenJobBucket"][];
             stages: components["schemas"]["OpenJobStage"][];
             jobs: components["schemas"]["OpenJob"][];
+        };
+        /** @description ตัวเลขสรุป 1 ช่อง: หัวข้อสั้น + ตัวเลขใหญ่ + คำอธิบาย */
+        OverviewFact: {
+            label: string;
+            value: string;
+            note: string;
+            /**
+             * Format: double
+             * @description สัดส่วน 0-100 แสดงเป็นแถบ
+             */
+            share: number | null;
+            tone: (components["schemas"]["ToneEnum"] | components["schemas"]["NullEnum"]) | null;
         };
         Part: {
             docnum: string;
@@ -582,6 +793,12 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * @description * `bad` - bad
+         *     * `good` - good
+         * @enum {string}
+         */
+        ToneEnum: "bad" | "good";
         TopCars: {
             labels: string[];
             companies: string[];
@@ -931,6 +1148,8 @@ export interface operations {
                 car_type?: number | null;
                 /** @description รหัสบริษัท (BaseBranchCompany.code) หรือ "ALL" */
                 company: string;
+                month_from?: number | null;
+                month_to?: number | null;
                 year?: number;
             };
             header?: never;

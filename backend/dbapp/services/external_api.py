@@ -3,6 +3,7 @@
 import logging
 
 import requests
+from rest_framework.exceptions import APIException
 
 from dbapp.models import BaseAPI
 
@@ -11,9 +12,22 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 10
 
 
+class WebstockNotConfigured(APIException):
+    """ยังไม่ได้ตั้งค่า BaseAPI ของ webstock -> ปุ่มอัปเดตแสดงข้อความนี้แทน error 500"""
+
+    status_code = 503
+    default_code = "webstock_not_configured"
+    default_detail = (
+        'ยังไม่ได้ตั้งค่าการเชื่อมต่อ webstock: เพิ่ม Base API ชื่อ "webstock" (URL, ชื่อผู้ใช้, รหัสผ่าน) ในหน้า Admin'
+    )
+
+
 def get_base_api():
     # query เมื่อเรียกใช้งานจริง (ไม่ cache ตอน import)
-    return BaseAPI.objects.get(apiname="webstock")
+    try:
+        return BaseAPI.objects.get(apiname="webstock")
+    except BaseAPI.DoesNotExist:
+        raise WebstockNotConfigured from None
 
 
 def get_base_url():

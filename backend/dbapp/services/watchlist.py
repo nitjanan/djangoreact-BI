@@ -9,27 +9,37 @@
 - ซ่อมซ้ำ: แจ้งซ่อมประเภทซ่อมอีกภายใน REPEAT_DAYS วันหลังครั้งก่อน (ซ่อมแล้วอาจยังไม่หาย)
 - ใช้น้ำมันสูง: ลิตร/ชม. เกิน FUEL_RATE_FACTOR เท่าของค่ากลาง
 - จอดซ่อมนาน: มีใบแจ้งซ่อมยังไม่ปิดงานนานเกิน STALE_DAYS วัน (สถานะ ณ ตอนนี้)
+- ควรพิจารณาเปลี่ยน: อายุ >= REPLACE_AGE ปี และต้นทุนซ่อม/ชม. เกิน REPLACE_COST_FACTOR เท่า
+  ของค่ากลางในชนิดรถเดียวกัน (รถเก่าที่ซ่อมแพงกว่าคันอื่นในงานแบบเดียวกัน)
 """
 
 from statistics import median
 
 from dbapp.models import SummaryMaintenance
 from dbapp.services.dashboard import MA_TYPE_BREAKDOWN, to_gregorian
-from dbapp.services.insights import COST_PER_HR_FACTOR, FUEL_RATE_FACTOR, MIN_CARS_TO_COMPARE
+from dbapp.services.insights import (
+    COST_PER_HR_FACTOR,
+    FUEL_PER_HOUR,
+    FUEL_RATE_FACTOR,
+    MIN_CARS_TO_COMPARE,
+)
 from dbapp.services.open_jobs import STALE_DAYS
 
 MTBF_FACTOR = 0.5  # MTBF ต่ำกว่าค่ากลางกี่เท่าจึงถือว่าเสียบ่อย
 MIN_FAILURES = 2  # เสียครั้งเดียว MTBF ยังเชื่อไม่ได้
 REPEAT_DAYS = 30
+REPLACE_AGE = 10  # ปี
+REPLACE_COST_FACTOR = 1.5
 
 COST = "cost"
 FAILURE = "failure"
 REPEAT = "repeat"
 FUEL = "fuel"
 STALE = "stale"
+REPLACE = "replace"
 
 # ลำดับความสำคัญของเหตุผล (ใช้เรียงรถที่ติดจำนวนข้อเท่ากัน)
-REASON_WEIGHT = {STALE: 3, COST: 3, REPEAT: 2, FAILURE: 2, FUEL: 1}
+REASON_WEIGHT = {STALE: 3, COST: 3, REPLACE: 2, REPEAT: 2, FAILURE: 2, FUEL: 1}
 
 
 def _key(row):
@@ -39,6 +49,17 @@ def _key(row):
 def _median_of(rows, field, valid):
     values = [r[field] for r in rows if valid(r)]
     return median(values) if len(values) >= MIN_CARS_TO_COMPARE else None
+
+
+def _cost_mid_by_type(car_rows):
+    """ค่ากลางต้นทุนซ่อม/ชม. แยกตามชนิดรถ (ชนิดที่รถน้อยกว่า MIN_CARS_TO_COMPARE ไม่เทียบ)"""
+    by_type = {}
+    for r in car_rows:
+        if r["work_total"] > 0 and r["repair_total"] > 0:
+            by_type.setdefault(r["car_type_id"], []).append(r["repair_cost_per_hr"])
+    return {
+        t: median(values) for t, values in by_type.items() if len(values) >= MIN_CARS_TO_COMPARE
+    }
 
 
 def repeat_repairs(maintenance_filter):
@@ -63,7 +84,7 @@ def repeat_repairs(maintenance_filter):
     return result
 
 
-def build_watchlist(car_rows, maintenance_filter, open_jobs):
+def build_watchlist(car_rows, maintenance_filter, open_jobs, noun="รถ", fuel=FUEL_PER_HOUR):
     """car_rows: แถวของตารางรถ (build_car_table)
     maintenance_filter: ตัวกรองใบแจ้งซ่อมของรถทั้งตาราง (มีปี ไม่กรองคันเดียว)
     open_jobs: ผลของ build_open_jobs (สถานะ ณ ตอนนี้)
@@ -74,10 +95,12 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs):
     repair_mid = _median_of(
         car_rows, "repair_total", lambda r: r["work_total"] > 0 and r["repair_total"] > 0
     )
+    fuel_field = fuel["field"]
     fuel_mid = _median_of(
-        car_rows, "fuel_rate", lambda r: r["work_total"] > 0 and r["oil_total"] > 0
+        car_rows, fuel_field, lambda r: r[fuel["base"]] > 0 and r["oil_total"] > 0
     )
     mtbf_mid = _median_of(car_rows, "mtbf", lambda r: r["mtbf"] is not None)
+    type_cost_mid = _cost_mid_by_type(car_rows)
 
     repeats = repeat_repairs(maintenance_filter)
 
@@ -106,7 +129,7 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs):
                     "code": COST,
                     "label": "ซ่อมแพงเทียบกับงาน",
                     "detail": f"{row['repair_cost_per_hr']:,.0f} บาท/ชม. "
-                    f"({row['repair_cost_per_hr'] / cost_mid:,.1f} เท่าของค่ากลาง)",
+                    f"({row['repair_cost_per_hr'] / cost_mid:,.1f} เท่าของ{noun}ส่วนใหญ่)",
                 }
             )
 
@@ -121,7 +144,7 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs):
                     "code": FAILURE,
                     "label": "เสียบ่อย",
                     "detail": f"เสีย {row['failure_count']} ครั้ง ทำงานเฉลี่ย "
-                    f"{row['mtbf']:,.0f} ชม. ต่อครั้ง (ค่ากลาง {mtbf_mid:,.0f} ชม.)",
+                    f"{row['mtbf']:,.0f} ชม. ต่อครั้ง ({noun}ส่วนใหญ่ {mtbf_mid:,.0f} ชม.)",
                 }
             )
 
@@ -139,16 +162,35 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs):
 
         if (
             fuel_mid
-            and row["work_total"] > 0
+            and row[fuel["base"]] > 0
             and row["oil_total"] > 0
-            and row["fuel_rate"] > fuel_mid * FUEL_RATE_FACTOR
+            and row[fuel_field] > fuel_mid * FUEL_RATE_FACTOR
         ):
             reasons.append(
                 {
                     "code": FUEL,
                     "label": "ใช้น้ำมันสูง",
-                    "detail": f"{row['fuel_rate']:,.2f} ลิตร/ชม. "
-                    f"({row['fuel_rate'] / fuel_mid:,.1f} เท่าของค่ากลาง)",
+                    "detail": f"{row[fuel_field]:,.2f} {fuel['unit']} "
+                    f"({row[fuel_field] / fuel_mid:,.1f} เท่าของ{noun}ส่วนใหญ่)",
+                }
+            )
+
+        type_mid = type_cost_mid.get(row["car_type_id"])
+        if (
+            type_mid
+            and row["age"] is not None
+            and row["age"] >= REPLACE_AGE
+            and row["work_total"] > 0
+            and row["repair_cost_per_hr"] > type_mid * REPLACE_COST_FACTOR
+        ):
+            type_name = row["car_type_name"] or noun
+            reasons.append(
+                {
+                    "code": REPLACE,
+                    "label": "ควรพิจารณาเปลี่ยน",
+                    "detail": f"อายุ {row['age']} ปี "
+                    f"ต้นทุนซ่อม {row['repair_cost_per_hr']:,.0f} บาท/ชม. "
+                    f"({row['repair_cost_per_hr'] / type_mid:,.1f} เท่าของ{type_name}ส่วนใหญ่)",
                 }
             )
 
@@ -198,6 +240,7 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs):
             for code, label in [
                 (STALE, "จอดซ่อมนาน"),
                 (COST, "ซ่อมแพงเทียบกับงาน"),
+                (REPLACE, "ควรพิจารณาเปลี่ยน"),
                 (REPEAT, "ซ่อมซ้ำ"),
                 (FAILURE, "เสียบ่อย"),
                 (FUEL, "ใช้น้ำมันสูง"),

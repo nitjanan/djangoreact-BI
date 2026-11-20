@@ -5,11 +5,14 @@ import { seriesRows } from '@/lib/export-excel'
 import { num } from '@/lib/format'
 
 import { ChartCard } from './ChartCard'
-import { CHART_HELP } from './chart-help'
+import { useChartHelp } from './chart-help'
+import { useNoun } from './export-context'
 import { COLOR, TEXT, baseOptions, carLabel, comboOptions } from './chart-theme'
 import { Kpi, KpiStrip } from './Kpi'
 
 export function Reliability({ data }: { data: Schemas['Reliability'] }) {
+  const CHART_HELP = useChartHelp()
+  const noun = useNoun()
   const trendSeries = [
     { name: 'จำนวนครั้งที่เสีย', type: 'column', data: data.trend.count },
     { name: 'เวลาซ่อมเฉลี่ย (ชม.)', type: 'line', data: data.trend.mttr },
@@ -69,7 +72,7 @@ export function Reliability({ data }: { data: Schemas['Reliability'] }) {
         </ChartCard>
 
         <ChartCard
-          title="รถที่เสียบ่อยที่สุด 10 อันดับ"
+          title={`${noun}ที่เสียบ่อยที่สุด 10 อันดับ`}
           help={CHART_HELP.topFailures}
           unit="ครั้ง"
           empty={data.top_cars.labels.length === 0}

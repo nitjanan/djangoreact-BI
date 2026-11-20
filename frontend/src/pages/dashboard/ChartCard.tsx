@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 
 import type { ChartHelp } from './chart-help'
 
-import { useExportFilters } from './export-context'
+import { useExportFilters, useNoun } from './export-context'
 
 /** แผงกราฟ: ขอบบาง ไม่มีเงา ชื่อกราฟ + หน่วย + ปุ่ม Excel */
 export function ChartCard({
@@ -33,6 +33,7 @@ export function ChartCard({
   className?: string
   children: ReactNode
 }) {
+  const noun = useNoun()
   const filters = useExportFilters()
   const [helpOpen, setHelpOpen] = useState(false)
   const helpId = useId()
@@ -94,7 +95,7 @@ export function ChartCard({
         {empty ? (
           <div className="flex h-56 flex-col items-center justify-center gap-1 text-center text-sm text-muted-foreground">
             <span className="font-medium text-foreground">ยังไม่มีข้อมูลในช่วงนี้</span>
-            ลองเปลี่ยนแผนก ประเภทรถ หรือบริษัท
+            ลองเปลี่ยนแผนก ประเภท{noun} หรือบริษัท
           </div>
         ) : (
           children

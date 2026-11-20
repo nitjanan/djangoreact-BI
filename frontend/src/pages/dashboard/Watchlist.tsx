@@ -7,19 +7,19 @@ import { downloadExcel } from "@/lib/export-excel";
 import { num } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { useExportFilters } from "./export-context";
+import { useExportFilters, useNoun } from "./export-context";
 
 type Watchlist = Schemas["Watchlist"];
 type WatchCar = Schemas["WatchCar"];
 type ReasonCode = WatchCar["reasons"][number]["code"];
 
-const TITLE = "รถที่ต้องจับตา";
 const PREVIEW_ROWS = 8;
 
 // สีตามความรุนแรงของเหตุผล: แดง = ต้องจัดการ, เหลือง = ติดตาม
 const REASON_TONE: Record<ReasonCode, string> = {
   stale: "bg-destructive/12 text-destructive",
   cost: "bg-destructive/12 text-destructive",
+  replace: "bg-chart-4/20 text-[color-mix(in_oklab,var(--chart-4)_55%,black)]",
   repeat: "bg-chart-4/20 text-[color-mix(in_oklab,var(--chart-4)_55%,black)]",
   failure: "bg-chart-4/20 text-[color-mix(in_oklab,var(--chart-4)_55%,black)]",
   fuel: "bg-muted text-muted-foreground",
@@ -38,14 +38,16 @@ export function Watchlist({
   const [showAll, setShowAll] = useState(false);
   const [reason, setReason] = useState<ReasonCode | null>(null);
   const filters = useExportFilters();
+  const noun = useNoun();
+  const TITLE = `${noun}ที่ต้องจับตา`;
 
   if (data.cars.length === 0) {
     return (
       <p className="rounded-xl border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
-        ไม่มีรถที่ผิดปกติในตัวกรองนี้
+        ไม่มี{noun}ที่ผิดปกติในตัวกรองนี้
         {!data.compared && (
           <span className="mt-1 block text-xs">
-            รถน้อยกว่า 5 คัน จึงไม่เทียบค่าซ่อม การเสีย และน้ำมันกับค่ากลาง
+            {noun}น้อยกว่า 5 คัน จึงไม่เทียบค่าซ่อม การเสีย และน้ำมันกับ{noun}ส่วนใหญ่
           </span>
         )}
       </p>
@@ -65,8 +67,8 @@ export function Watchlist({
       rows: [
         [
           "บริษัท",
-          "รหัสรถ",
-          "ชื่อรถ",
+          `รหัส${noun}`,
+          `ชื่อ${noun}`,
           "จำนวนเรื่อง",
           "เรื่องที่ต้องจับตา",
           "รายละเอียด",
@@ -194,7 +196,7 @@ function CarRow({
       <button
         type="button"
         onClick={() => onSelectCar(c.car_id, c.branch_company_id)}
-        title="เลือกรถคันนี้"
+        title="เลือกคันนี้"
         className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1.5 px-1 py-2.5 text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring sm:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)_auto]"
       >
         <span className="min-w-0">
@@ -224,7 +226,7 @@ function CarRow({
         </ul>
 
         <span className="col-start-2 row-start-1 inline-flex items-center gap-0.5 justify-self-end text-xs text-primary sm:col-start-auto sm:row-start-auto">
-          ดูรถ
+          ดูคันนี้
           <ChevronRight
             className="size-3.5 transition-transform group-hover:translate-x-0.5"
             aria-hidden

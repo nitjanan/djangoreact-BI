@@ -7,7 +7,7 @@ import { downloadExcel } from '@/lib/export-excel'
 import { num } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { useExportFilters } from './export-context'
+import { useExportFilters, useNoun } from './export-context'
 import { Kpi, KpiStrip } from './Kpi'
 import { PartsDetails } from './Parts'
 
@@ -44,6 +44,7 @@ export function OpenJobs({
   data: OpenJobs
   onSelectCar: (carId: number, branchCompanyId: string) => void
 }) {
+  const noun = useNoun()
   const [showAll, setShowAll] = useState(false)
   const [stage, setStage] = useState<string | null>(null)
   const filters = useExportFilters()
@@ -66,8 +67,8 @@ export function OpenJobs({
       filters,
       rows: [
         [
-          'เลขที่ใบแจ้งซ่อม', 'บริษัท', 'รหัสรถ', 'ชื่อรถ', 'อาการเสีย', 'วันที่แจ้ง', 'ค้างมา (วัน)',
-          'สภาพรถ', 'ขั้นที่ค้าง', 'อยู่ขั้นนี้ (วัน)', 'กำหนดรับของ', 'เอกสาร',
+          'เลขที่ใบแจ้งซ่อม', 'บริษัท', `รหัส${noun}`, `ชื่อ${noun}`, 'อาการเสีย', 'วันที่แจ้ง', 'ค้างมา (วัน)',
+          `สภาพ${noun}`, 'ขั้นที่ค้าง', 'อยู่ขั้นนี้ (วัน)', 'กำหนดรับของ', 'เอกสาร',
         ],
         ...data.jobs.map((j) => [
           j.ref_no,
@@ -91,7 +92,7 @@ export function OpenJobs({
       <KpiStrip className="sm:grid-cols-3 xl:grid-cols-3">
         <Kpi label="ใบงานที่ยังไม่ปิด" value={num(data.total, 0)} unit="ใบ" />
         <Kpi
-          label="รถจอดซ่อมอยู่ตอนนี้"
+          label={`${noun}จอดซ่อมอยู่ตอนนี้`}
           value={num(data.car_count, 0)}
           unit="คัน"
           note={data.immobile_car_count ? `เคลื่อนย้ายไม่ได้ ${num(data.immobile_car_count, 0)} คัน` : undefined}
@@ -180,7 +181,7 @@ function JobRow({
         disabled={!select}
         onClick={select}
         className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 px-1 py-2.5 text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-default sm:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)_auto]"
-        title={select ? 'เลือกรถคันนี้' : undefined}
+        title={select ? 'เลือกคันนี้' : undefined}
       >
         <span className="min-w-0">
           <span className="block truncate font-medium">{carName(j)}</span>

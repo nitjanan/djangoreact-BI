@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import type { CarRow, Schemas } from '@/api/client'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Table,
   TableBody,
@@ -15,20 +16,51 @@ import {
 import { num } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { useFuel, useNoun, type Fuel } from './export-context'
+
 type Metrics = CarRow | Schemas['CarTotals']
 
 /** ตัดช่องว่าง/ขีดออก ให้พิมพ์ทะเบียน "1ตญ2871" แล้วเจอ "1ตญ-2871" */
 const normalize = (s: string) => s.toLowerCase().replace(/[\s-]/g, '')
 
+const ALL_BRANDS = '__all__'
+const NO_BRAND = '__none__'
+/** กรอกต่างกันแค่ช่องว่าง/ขีด/วงเล็บ/ตัวพิมพ์ ถือเป็นยี่ห้อเดียวกัน (เหมือนตารางเทียบรุ่นฝั่ง server) */
+const brandKey = (brand: string | null | undefined) =>
+  (brand ?? '').toUpperCase().replace(/[^\p{L}\p{N}]+/gu, '') || NO_BRAND
+
+/** ยี่ห้อที่มีในตาราง เรียงตามจำนวนคัน (ชื่อที่แสดงใช้แบบที่เจอก่อน) */
+function brandOptions(rows: CarRow[]) {
+  const map = new Map<string, { label: string; count: number }>()
+  for (const r of rows) {
+    const key = brandKey(r.brand)
+    const item = map.get(key) ?? { label: r.brand?.trim() || 'ไม่ระบุยี่ห้อ', count: 0 }
+    item.count += 1
+    map.set(key, item)
+  }
+  return [...map.entries()]
+    .map(([key, v]) => ({ key, ...v }))
+    .sort((a, b) =>
+      a.key === NO_BRAND ? 1 : b.key === NO_BRAND ? -1 : b.count - a.count || a.label.localeCompare(b.label, 'th'),
+    )
+}
+
 type SortValue = number | string | null | undefined
 
-const COLUMNS: {
+type Column = {
   label: string
   unit?: string
   value: (r: Metrics) => string
   sortBy: (r: CarRow) => SortValue
-}[] = [
-  { label: '%MA', value: (r) => `${num(r.percent_ma, 2)}%`, sortBy: (r) => r.percent_ma },
+}
+
+/** คอลัมน์ตัวเลข: รถบรรทุกเทียบน้ำมันเป็น ลิตร/กม. และมีคอลัมน์ระยะทาง */
+const columnsFor = (fuel: Fuel): Column[] => [
+  {
+    label: '%MA',
+    value: (r) => `${num(r.percent_ma, 2)}%`,
+    sortBy: (r) => r.percent_ma,
+  },
   {
     label: 'ทำงานเฉลี่ยต่อวัน',
     unit: 'ชม.',
@@ -36,17 +68,32 @@ const COLUMNS: {
     sortBy: (r) => r.avg_work_per_day,
   },
   {
-    label: 'การทำงาน',
+    label: 'การทำงานรวม',
     unit: 'ชม.',
     value: (r) => num(r.work_total, 2),
     sortBy: (r) => r.work_total,
   },
-  { label: 'น้ำมันดีเซล', unit: 'ลิตร', value: (r) => num(r.oil_total, 2), sortBy: (r) => r.oil_total },
+  {
+    label: 'น้ำมันดีเซล',
+    unit: 'ลิตร',
+    value: (r) => num(r.oil_total, 2),
+    sortBy: (r) => r.oil_total,
+  },
+  ...(fuel.field === 'liter_per_km'
+    ? [
+        {
+          label: 'ระยะทาง',
+          unit: 'กม.',
+          value: (r: Metrics) => num(r.km_total, 0),
+          sortBy: (r: CarRow) => r.km_total,
+        },
+      ]
+    : []),
   {
     label: 'อัตราเชื้อเพลิง',
-    unit: 'ลิตร/ชม.',
-    value: (r) => num(r.fuel_rate, 2),
-    sortBy: (r) => r.fuel_rate,
+    unit: fuel.unit,
+    value: (r) => num(r[fuel.field], 2),
+    sortBy: (r) => r[fuel.field],
   },
   {
     label: 'ค่าซ่อม',
@@ -60,20 +107,54 @@ const COLUMNS: {
     value: (r) => num(r.repair_cost_per_hr, 2),
     sortBy: (r) => r.repair_cost_per_hr,
   },
-  { label: 'ครั้งที่เสีย', value: (r) => String(r.failure_count), sortBy: (r) => r.failure_count },
-  { label: 'MTBF', unit: 'ชม.', value: (r) => num(r.mtbf, 1), sortBy: (r) => r.mtbf },
-  { label: 'MTTR', unit: 'ชม.', value: (r) => num(r.mttr, 1), sortBy: (r) => r.mttr },
+  {
+    label: 'ครั้งที่เสีย',
+    value: (r) => String(r.failure_count),
+    sortBy: (r) => r.failure_count,
+  },
+  {
+    label: 'MTBF',
+    unit: 'ชม.',
+    value: (r) => num(r.mtbf, 1),
+    sortBy: (r) => r.mtbf,
+  },
+  {
+    label: 'MTTR',
+    unit: 'ชม.',
+    value: (r) => num(r.mttr, 1),
+    sortBy: (r) => r.mttr,
+  },
 ]
 
-const TEXT_COLUMNS: { label: string; sortBy: (r: CarRow) => SortValue }[] = [
-  { label: 'บริษัท', sortBy: (r) => r.branch_company_name },
-  { label: 'รหัส', sortBy: (r) => r.code },
-  { label: 'ชื่อรถ', sortBy: (r) => r.name },
+type TextColumn = {
+  label: string
+  sortBy: (r: CarRow) => SortValue
+  cell: (r: CarRow) => string
+  className?: string
+}
+
+const TEXT_COLUMNS: TextColumn[] = [
+  { label: 'บริษัท', sortBy: (r) => r.branch_company_name, cell: (r) => r.branch_company_name },
+  { label: 'รหัส', sortBy: (r) => r.code, cell: (r) => r.code || '–', className: 'font-medium' },
+  { label: 'ชื่อ', sortBy: (r) => r.name, cell: (r) => r.name ?? '' },
+  { label: 'ยี่ห้อ', sortBy: (r) => r.brand, cell: (r) => r.brand || '–' },
+  { label: 'รุ่น', sortBy: (r) => r.car_model, cell: (r) => r.car_model || '–' },
+  {
+    label: 'ปีที่เริ่มใช้งาน',
+    sortBy: (r) => r.start_year,
+    cell: (r) => (r.start_year ? String(r.start_year) : '–'),
+    className: 'tabular-nums',
+  },
+  {
+    label: 'อายุ (ปี)',
+    sortBy: (r) => r.age,
+    cell: (r) => (r.age == null ? '–' : String(r.age)),
+    className: 'tabular-nums',
+  },
 ]
 
-const SORTERS: Record<string, (r: CarRow) => SortValue> = Object.fromEntries(
-  [...TEXT_COLUMNS, ...COLUMNS].map((c) => [c.label, c.sortBy]),
-)
+/** ลำดับ + คอลัมน์ตัวหนังสือ (ใช้กับ colSpan ของแถวว่าง/แถวรวม) */
+const LEADING_COLUMNS = TEXT_COLUMNS.length + 1
 
 type Sort = { key: string; dir: 'asc' | 'desc' } | null
 
@@ -143,13 +224,25 @@ export function CarTable({
   selected: CarRow | null
   onSelect: (row: CarRow) => void
 }) {
+  const noun = useNoun()
+  const COLUMNS = columnsFor(useFuel())
+  const SORTERS: Record<string, (r: CarRow) => SortValue> = Object.fromEntries(
+    [...TEXT_COLUMNS, ...COLUMNS].map((c) => [c.label, c.sortBy]),
+  )
   const [query, setQuery] = useState('')
+  const [brand, setBrand] = useState(ALL_BRANDS)
+  const brands = brandOptions(table.rows)
+  // แผนก/ตัวกรองเปลี่ยนแล้วยี่ห้อที่เลือกไว้ไม่มีในตาราง -> กลับไปทุกยี่ห้อ
+  const activeBrand = brands.some((b) => b.key === brand) ? brand : ALL_BRANDS
   const [sort, setSort] = useState<Sort>(null)
   const onSort = (key: string) =>
     setSort((s) =>
       s?.key === key
         ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
-        : { key, dir: TEXT_COLUMNS.some((c) => c.label === key) ? 'asc' : 'desc' },
+        : {
+            key,
+            dir: TEXT_COLUMNS.some((c) => c.label === key) ? 'asc' : 'desc',
+          },
     )
   const isSelected = (r: CarRow) =>
     selected?.car_id === r.car_id && selected.branch_company_id === r.branch_company_id
@@ -158,12 +251,20 @@ export function CarTable({
   // เก็บลำดับเดิมไว้ ค้นหาแล้วยังเห็นว่าคันนี้อยู่ลำดับที่เท่าไรในตารางเต็ม
   const rows = table.rows
     .map((row, index) => ({ row, rank: index + 1 }))
-    .filter(({ row }) => !q || normalize(`${row.code ?? ''} ${row.name ?? ''}`).includes(q))
-  if (sort) {
-    const by = SORTERS[sort.key]
+    .filter(({ row }) => activeBrand === ALL_BRANDS || brandKey(row.brand) === activeBrand)
+    .filter(
+      ({ row }) =>
+        !q ||
+        normalize(
+          `${row.code ?? ''} ${row.name ?? ''} ${row.brand ?? ''} ${row.car_model ?? ''}`,
+        ).includes(q),
+    )
+  // คอลัมน์เปลี่ยนตามแผนก (เช่น ลิตร/ชม. ↔ ลิตร/กม.) ถ้าคอลัมน์ที่เรียงอยู่หายไปก็ไม่ต้องเรียง
+  const by = sort ? SORTERS[sort.key] : undefined
+  if (sort && by) {
     rows.sort((a, b) => compare(by(a.row), by(b.row), sort.dir) || a.rank - b.rank)
   }
-  const filtering = q !== ''
+  const filtering = q !== '' || activeBrand !== ALL_BRANDS
 
   return (
     <div className="grid gap-3">
@@ -178,8 +279,8 @@ export function CarTable({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
-            placeholder="ค้นหาชื่อรถหรือรหัส"
-            aria-label="ค้นหาชื่อรถหรือรหัส"
+            placeholder={`ค้นหาชื่อ${noun} รหัส ยี่ห้อ หรือรุ่น`}
+            aria-label={`ค้นหาชื่อ${noun} รหัส ยี่ห้อ หรือรุ่น`}
             className="bg-card pr-8 pl-8 [&::-webkit-search-cancel-button]:hidden"
           />
           {query && (
@@ -193,6 +294,21 @@ export function CarTable({
             </button>
           )}
         </div>
+        {brands.length > 1 && (
+          <Select value={activeBrand} onValueChange={setBrand}>
+            <SelectTrigger className="w-full bg-card sm:w-56" aria-label="กรองตามยี่ห้อ">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_BRANDS}>ทุกยี่ห้อ ({table.rows.length})</SelectItem>
+              {brands.map((b) => (
+                <SelectItem key={b.key} value={b.key}>
+                  {b.label} ({b.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {filtering && (
           <span className="text-sm text-muted-foreground" aria-live="polite">
             พบ {rows.length} จาก {table.rows.length} คัน
@@ -237,10 +353,14 @@ export function CarTable({
             {rows.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={COLUMNS.length + 4}
+                  colSpan={COLUMNS.length + LEADING_COLUMNS}
                   className="h-28 text-center text-muted-foreground"
                 >
-                  {filtering ? `ไม่พบรถที่ชื่อหรือรหัสตรงกับ "${query.trim()}"` : 'ยังไม่มีรถที่มีข้อมูลในตัวกรองนี้'}
+                  {q
+                    ? `ไม่พบ${noun}ที่ชื่อ รหัส ยี่ห้อ หรือรุ่นตรงกับ "${query.trim()}"`
+                    : filtering
+                    ? `ไม่มี${noun}ยี่ห้อนี้`
+                    : `ยังไม่มี${noun}ที่มีข้อมูลในตัวกรองนี้`}
                 </TableCell>
               </TableRow>
             )}
@@ -260,9 +380,11 @@ export function CarTable({
                 }}
               >
                 <TableCell className="text-muted-foreground tabular-nums">{rank}</TableCell>
-                <TableCell>{row.branch_company_name}</TableCell>
-                <TableCell className="font-medium">{row.code || '–'}</TableCell>
-                <TableCell>{row.name}</TableCell>
+                {TEXT_COLUMNS.map((c) => (
+                  <TableCell key={c.label} className={c.className}>
+                    {c.cell(row)}
+                  </TableCell>
+                ))}
                 {COLUMNS.map((c) => (
                   <TableCell key={c.label} className="text-right tabular-nums">
                     {c.value(row)}
@@ -274,7 +396,7 @@ export function CarTable({
           {table.rows.length > 0 && (
             <TableFooter className="sticky bottom-0 bg-steel font-semibold">
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={4} className="text-right">
+                <TableCell colSpan={LEADING_COLUMNS} className="text-right">
                   {/* ยอดรวมมาจาก server นับทุกคันเสมอ ไม่ใช่เฉพาะคันที่ค้นเจอ */}
                   {filtering ? 'รวมทั้งหมด' : 'รวม'} {table.rows.length} คัน
                 </TableCell>

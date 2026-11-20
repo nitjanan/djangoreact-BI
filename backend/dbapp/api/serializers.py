@@ -68,7 +68,7 @@ class CarTypeSerializer(serializers.ModelSerializer):
 class CarSerializer(serializers.ModelSerializer):
     class Meta:
         model = BaseCar
-        fields = ["id", "code", "name", "car_dep", "car_type"]
+        fields = ["id", "code", "name", "car_dep", "car_type", "start_year", "brand", "car_model"]
 
 
 # ------------------------------------------------------------- dashboard
@@ -77,6 +77,12 @@ class CarSerializer(serializers.ModelSerializer):
 class DashboardQuerySerializer(serializers.Serializer):
     company = serializers.CharField(help_text='รหัสบริษัท (BaseBranchCompany.code) หรือ "ALL"')
     year = serializers.IntegerField(required=False, min_value=2000, max_value=2100)
+    month_from = serializers.IntegerField(
+        required=False, allow_null=True, default=None, min_value=1, max_value=12
+    )
+    month_to = serializers.IntegerField(
+        required=False, allow_null=True, default=None, min_value=1, max_value=12
+    )
     car_dep = serializers.IntegerField(required=False, default=1)
     car_type = serializers.IntegerField(required=False, allow_null=True, default=None)
     car_id = serializers.IntegerField(required=False, allow_null=True, default=None)
@@ -86,7 +92,16 @@ class DashboardQuerySerializer(serializers.Serializer):
 class DashboardFiltersSerializer(serializers.Serializer):
     company = serializers.CharField()
     year = serializers.IntegerField()
+    month_from = serializers.IntegerField()
+    month_to = serializers.IntegerField()
+    years = serializers.ListField(child=serializers.IntegerField())
     car_dep = serializers.IntegerField()
+    fuel_field = serializers.ChoiceField(
+        choices=["fuel_rate", "liter_per_km"],
+        help_text="ค่าที่ใช้เป็นอัตราการใช้น้ำมันของแผนกนี้ (รถบรรทุก = ลิตร/กม.)",
+    )
+    fuel_unit = serializers.CharField()
+    unit_noun = serializers.CharField(help_text="ชื่อแผนกที่เลือก ใช้แทนคำว่า รถ บนหน้าเว็บ")
     car_type = serializers.IntegerField(allow_null=True)
     car_id = serializers.IntegerField(allow_null=True)
     branch_company_id = serializers.CharField(allow_null=True)
@@ -98,11 +113,19 @@ class CarRowSerializer(serializers.Serializer):
     branch_company_name = serializers.CharField()
     code = serializers.CharField()
     name = serializers.CharField(allow_null=True)
+    start_year = serializers.IntegerField(allow_null=True, help_text="ปีที่เริ่มใช้งาน (ค.ศ.)")
+    brand = serializers.CharField(allow_null=True)
+    car_model = serializers.CharField(allow_null=True)
+    age = serializers.IntegerField(allow_null=True, help_text="อายุ (ปี) ณ ปีที่เลือก")
+    car_type_id = serializers.IntegerField(allow_null=True)
+    car_type_name = serializers.CharField(allow_null=True)
     percent_ma = serializers.FloatField()
     avg_work_per_day = serializers.FloatField()
     work_total = serializers.FloatField()
     oil_total = serializers.FloatField()
     fuel_rate = serializers.FloatField()
+    km_total = serializers.FloatField(help_text="กม. จากเลขไมล์ในเดือนที่เติมน้ำมัน")
+    liter_per_km = serializers.FloatField()
     repair_total = serializers.FloatField()
     repair_cost_per_hr = serializers.FloatField()
     failure_count = serializers.IntegerField()
@@ -116,11 +139,24 @@ class CarTotalsSerializer(serializers.Serializer):
     work_total = serializers.FloatField()
     oil_total = serializers.FloatField()
     fuel_rate = serializers.FloatField()
+    km_total = serializers.FloatField(help_text="กม. จากเลขไมล์ในเดือนที่เติมน้ำมัน")
+    liter_per_km = serializers.FloatField()
     repair_total = serializers.FloatField()
     repair_cost_per_hr = serializers.FloatField()
     failure_count = serializers.IntegerField()
     mtbf = serializers.FloatField(allow_null=True)
     mttr = serializers.FloatField(allow_null=True)
+
+
+class CompareSerializer(serializers.Serializer):
+    """ช่วงเดียวกันของปีก่อน"""
+
+    year = serializers.IntegerField()
+    month_from = serializers.IntegerField()
+    month_to = serializers.IntegerField()
+    has_data = serializers.BooleanField()
+    repair_total = serializers.FloatField()
+    totals = CarTotalsSerializer(allow_null=True)
 
 
 class CarTableSerializer(serializers.Serializer):
@@ -170,6 +206,8 @@ class CarSeriesChartSerializer(SeriesTotalChartSerializer):
 class HeatmapRowSerializer(serializers.Serializer):
     name = serializers.CharField()
     company = serializers.CharField()
+    car_id = serializers.IntegerField(allow_null=True)
+    branch_company_id = serializers.CharField(allow_null=True)
     data = _floats()
 
 
@@ -303,7 +341,7 @@ class PartsJobSerializer(serializers.Serializer):
     parts = PartSerializer(many=True)
 
 
-WATCH_REASONS = ["stale", "cost", "repeat", "failure", "fuel"]
+WATCH_REASONS = ["stale", "cost", "replace", "repeat", "failure", "fuel"]
 
 
 class WatchReasonSerializer(serializers.Serializer):
@@ -350,6 +388,24 @@ class InsightTargetSerializer(serializers.Serializer):
     branch_company_id = serializers.CharField()
 
 
+class InsightCompareSerializer(serializers.Serializer):
+    """ตัวเลข 2 ค่าแสดงคู่กัน: ค่าที่ผิดปกติ vs ค่าปกติ"""
+
+    value = serializers.FloatField()
+    baseline = serializers.FloatField()
+    value_text = serializers.CharField()
+    baseline_text = serializers.CharField()
+    value_label = serializers.CharField()
+    baseline_label = serializers.CharField()
+
+
+class InsightCarSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    company = serializers.CharField()
+    value = serializers.CharField()
+    target = InsightTargetSerializer(allow_null=True)
+
+
 class InsightItemSerializer(serializers.Serializer):
     severity = serializers.ChoiceField(choices=["high", "medium", "good", "info"])
     kind = serializers.ChoiceField(choices=["urgent", "anomaly", "efficiency", "trend", "data"])
@@ -357,11 +413,103 @@ class InsightItemSerializer(serializers.Serializer):
     detail = serializers.CharField()
     target = InsightTargetSerializer(allow_null=True)
     action = serializers.CharField(allow_null=True)
+    compare = InsightCompareSerializer(allow_null=True)
+    cars = InsightCarSerializer(many=True)
+    points = serializers.ListField(child=serializers.CharField())
+    hint = serializers.CharField(allow_blank=True)
+
+
+class OverviewFactSerializer(serializers.Serializer):
+    """ตัวเลขสรุป 1 ช่อง: หัวข้อสั้น + ตัวเลขใหญ่ + คำอธิบาย"""
+
+    label = serializers.CharField()
+    value = serializers.CharField()
+    note = serializers.CharField(allow_blank=True)
+    share = serializers.FloatField(allow_null=True, help_text="สัดส่วน 0-100 แสดงเป็นแถบ")
+    tone = serializers.ChoiceField(choices=["bad", "good"], allow_null=True)
 
 
 class InsightsSerializer(serializers.Serializer):
-    overview = serializers.ListField(child=serializers.CharField())
+    overview = OverviewFactSerializer(many=True)
     items = InsightItemSerializer(many=True)
+
+
+class JobItemSerializer(serializers.Serializer):
+    job = serializers.CharField()
+    hours = serializers.FloatField()
+    km = serializers.FloatField()
+    trips = serializers.IntegerField()
+    cars = serializers.IntegerField()
+
+
+class JobDepartmentSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    assigned = serializers.BooleanField(help_text="false = ไม่ได้ระบุแผนกค่าใช้จ่ายในบันทึก")
+    hours = serializers.FloatField()
+    km = serializers.FloatField()
+    trips = serializers.IntegerField()
+    cars = serializers.IntegerField()
+    jobs = JobItemSerializer(many=True)
+
+
+class JobsSerializer(serializers.Serializer):
+    """งานที่ทำจากบันทึกการใช้รถ แยกตามแผนกค่าใช้จ่าย"""
+
+    hours = serializers.FloatField()
+    km = serializers.FloatField()
+    trips = serializers.IntegerField()
+    departments = JobDepartmentSerializer(many=True)
+
+
+class ModelComparisonRowSerializer(serializers.Serializer):
+    car_type_id = serializers.IntegerField(allow_null=True)
+    car_type_name = serializers.CharField()
+    brand = serializers.CharField()
+    car_model = serializers.CharField(allow_null=True)
+    cars = serializers.IntegerField()
+    avg_age = serializers.FloatField(allow_null=True, help_text="เฉลี่ยเฉพาะคันที่รู้ปีที่เริ่มใช้งาน")
+    work_total = serializers.FloatField(help_text="ชั่วโมงรวมของคันที่ชั่วโมง > 0 (ใช้คิดค่าต่อชั่วโมง)")
+    repair_total = serializers.FloatField()
+    repair_cost_per_hr = serializers.FloatField(allow_null=True)
+    type_repair_cost_per_hr = serializers.FloatField(
+        allow_null=True, help_text="ต้นทุนซ่อม/ชม. ของทั้งชนิดรถนี้ (รวมคันที่ไม่ได้กรอกยี่ห้อ)"
+    )
+    vs_type = serializers.FloatField(
+        allow_null=True, help_text="ต้นทุนซ่อม/ชม. ของรุ่นนี้ ÷ ของทั้งชนิดรถ (1 = เท่ากัน)"
+    )
+    fuel = serializers.FloatField(allow_null=True, help_text="หน่วยตาม filters.fuel_unit")
+    failure_count = serializers.IntegerField()
+    mtbf = serializers.FloatField(allow_null=True)
+    percent_ma = serializers.FloatField(allow_null=True)
+
+
+class ModelComparisonSerializer(serializers.Serializer):
+    """เทียบยี่ห้อ/รุ่นภายในชนิดรถเดียวกัน"""
+
+    rows = ModelComparisonRowSerializer(many=True)
+    min_cars = serializers.IntegerField(help_text="รุ่นที่มีรถน้อยกว่านี้ยังสรุปไม่ได้")
+    total_cars = serializers.IntegerField()
+    missing_cars = serializers.IntegerField(help_text="คันที่ยังไม่ได้กรอกยี่ห้อใน webstock")
+
+
+class BenchmarkMetricsSerializer(serializers.Serializer):
+    cars = serializers.IntegerField()
+    avg_age = serializers.FloatField(allow_null=True)
+    repair_cost_per_hr = serializers.FloatField(allow_null=True)
+    fuel = serializers.FloatField(allow_null=True, help_text="หน่วยตาม filters.fuel_unit")
+    mtbf = serializers.FloatField(allow_null=True)
+    percent_ma = serializers.FloatField(allow_null=True)
+
+
+class ModelBenchmarkSerializer(serializers.Serializer):
+    """รถที่เลือก เทียบกับคันอื่นรุ่นเดียวกัน / ชนิดเดียวกัน (ไม่รวมคันนี้)"""
+
+    brand = serializers.CharField()
+    car_model = serializers.CharField(allow_null=True)
+    car_type_name = serializers.CharField()
+    car = BenchmarkMetricsSerializer()
+    model = BenchmarkMetricsSerializer(allow_null=True, help_text="null = ไม่มีคันอื่นรุ่นนี้")
+    type = BenchmarkMetricsSerializer(allow_null=True)
 
 
 class DashboardSerializer(serializers.Serializer):
@@ -374,8 +522,17 @@ class DashboardSerializer(serializers.Serializer):
     unmatched = UnmatchedSerializer()
     open_jobs = OpenJobsSerializer()
     parts = PartsSerializer()
+    jobs = JobsSerializer()
     watchlist = WatchlistSerializer()
+    model_comparison = ModelComparisonSerializer()
+    model_benchmark = ModelBenchmarkSerializer(
+        allow_null=True, help_text="null = ไม่ได้เลือกรถ หรือรถคันนี้ยังไม่ได้กรอกยี่ห้อ"
+    )
+    compare = CompareSerializer()
     insights = InsightsSerializer()
+    last_synced_at = serializers.DateTimeField(
+        allow_null=True, help_text="เวลาที่อัปเดตข้อมูลจาก webstock ครั้งล่าสุด"
+    )
 
 
 # ------------------------------------------------------------------ sync

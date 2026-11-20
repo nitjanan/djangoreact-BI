@@ -186,6 +186,8 @@ class DashboardView(APIView):
         filters = DashboardFilters(
             company=params["company"],
             year=params.get("year") or date.today().year,
+            month_from=params["month_from"],
+            month_to=params["month_to"],
             car_dep=params["car_dep"],
             car_type=params["car_type"],
             car_id=params["car_id"],

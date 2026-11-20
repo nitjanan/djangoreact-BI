@@ -170,6 +170,8 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "webmaster@localhost")
 # ใบแจ้งซ่อมยังทดสอบกับ webstock บนเครื่อง local: เว้นว่างเพื่อใช้ BaseAPI ในฐานข้อมูล
 # ว่าง = ใช้ base url เดียวกับ API อื่น (ระบบเดิม hard-code 127.0.0.1:8000 ไว้ตอนพัฒนา)
 MAINTENANCE_API_BASE = os.environ.get("MAINTENANCE_API_BASE", "") or None
+# งานจากบันทึกการใช้รถ (car_jobs) มีแค่ webstock บนเครื่อง local ตอนนี้: ว่าง = ใช้ BaseAPI
+CARLOG_JOBS_API_BASE = os.environ.get("CARLOG_JOBS_API_BASE", "") or None
 
 # dev: เสิร์ฟ static จาก app โดยไม่ต้อง collectstatic
 WHITENOISE_USE_FINDERS = DEBUG

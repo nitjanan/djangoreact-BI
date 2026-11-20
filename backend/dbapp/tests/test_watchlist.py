@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 
 from dbapp.models import BaseBranchCompany, BaseCar, BaseCarDepartment, SummaryMaintenance
-from dbapp.services.watchlist import REPEAT_DAYS, build_watchlist
+from dbapp.services.watchlist import REPEAT_DAYS, REPLACE_AGE, build_watchlist
 
 NO_OPEN_JOBS = {"jobs": []}
 
@@ -23,6 +23,9 @@ def car(car_id, **values):
         "fuel_rate": 10.0,
         "failure_count": 2,
         "mtbf": 500.0,
+        "car_type_id": 1,
+        "car_type_name": "รถขุด",
+        "age": None,
     }
     row.update(values)
     return row
@@ -62,7 +65,7 @@ def test_flags_costly_frequent_and_fuel_hungry_cars():
     )
     assert codes(result) == {6: ["cost"], 7: ["failure"], 8: ["fuel"]}
     counts = {r["code"]: r["count"] for r in result["reasons"]}
-    assert counts == {"stale": 0, "cost": 1, "repeat": 0, "failure": 1, "fuel": 1}
+    assert counts == {"stale": 0, "cost": 1, "replace": 0, "repeat": 0, "failure": 1, "fuel": 1}
 
 
 @pytest.mark.django_db
@@ -119,3 +122,27 @@ def test_repeat_repairs_within_days(db):
     assert codes(result) == {1: ["repeat"]}
     detail = result["cars"][0]["reasons"][0]["detail"]
     assert detail == f"แจ้งซ่อมซ้ำภายใน {REPEAT_DAYS} วัน 1 ครั้ง (ห่างกันน้อยสุด 19 วัน)"
+
+
+@pytest.mark.django_db
+def test_old_car_costlier_than_its_car_type_is_replacement_candidate():
+    result = run(
+        fleet(
+            car(6, age=REPLACE_AGE + 4, repair_cost_per_hr=200.0),
+            car(7, age=REPLACE_AGE - 1, repair_cost_per_hr=200.0),  # ยังไม่เก่า
+            car(8, age=REPLACE_AGE + 4, repair_cost_per_hr=120.0),  # เก่าแต่ซ่อมไม่แพง
+            car(9, age=None, repair_cost_per_hr=200.0),  # ไม่รู้อายุ
+        )
+    )
+    assert codes(result) == {6: ["replace"]}
+    detail = result["cars"][0]["reasons"][0]["detail"]
+    assert f"อายุ {REPLACE_AGE + 4} ปี" in detail
+    assert "2.0 เท่าของรถขุดส่วนใหญ่" in detail
+
+
+@pytest.mark.django_db
+def test_replacement_compares_within_car_type_only():
+    # รถตัก 5 คันต้นทุน 300 บาท/ชม. ทั้งหมด คันเก่าต้นทุน 400 ไม่ถึง 1.5 เท่าของรถตัก
+    loaders = [car(20 + i, car_type_id=2, repair_cost_per_hr=300.0) for i in range(5)]
+    result = run(fleet(*loaders, car(30, car_type_id=2, age=20, repair_cost_per_hr=400.0)))
+    assert "replace" not in [r["code"] for c in result["cars"] for r in c["reasons"]]

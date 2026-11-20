@@ -14,6 +14,7 @@ from dbapp.models import (
     BaseRepairType,
     BaseVisible,
     SummaryCarDep,
+    SummaryCarJob,
     SummaryOil,
     SummaryRepair,
     SummaryWork,
@@ -69,7 +70,9 @@ class BaseCarAdmin(ImportExportModelAdmin):
         "car_type",
     ]
 
-    list_display = ["id", "code", "name", "car_dep", "car_type"]  # แสดงรายการสินค้าในรูปแบบตาราง
+    list_display = [
+        "id", "code", "name", "car_dep", "car_type", "start_year", "brand", "car_model",
+    ]  # fmt: skip
     search_fields = ["code", "name", "car_type__name", "car_dep__name"]
     form = BaseCarAdminForm
 
@@ -145,6 +148,24 @@ class SummaryWorkAdmin(ImportExportModelAdmin):
     list_per_page = 20  # แสดงผล 20 รายการต่อ 1 หน้า
 
 
+class SummaryCarJobAdmin(ImportExportModelAdmin):
+    list_display = [
+        "id",
+        "summary_date",
+        "car",
+        "expense_dept_name",
+        "job",
+        "hours",
+        "km",
+        "trips",
+        "branch_company",
+        "car_dep",
+    ]
+    list_filter = ["year", "month", "branch_company", "car_dep", "expense_dept_name"]
+    search_fields = ["car__code", "car__name", "job", "expense_dept_name"]
+    list_per_page = 20
+
+
 admin.site.register(BaseAffiliatedCompany, BaseAffiliatedCompanyAdmin)
 admin.site.register(BaseBranchCompany, BaseBranchCompanyAdmin)
 admin.site.register(BaseVisible, BaseVisibleAdmin)
@@ -158,3 +179,4 @@ admin.site.register(SummaryCarDep, SummaryCarDepAdmin)
 admin.site.register(SummaryRepair, SummaryRepairAdmin)
 admin.site.register(SummaryOil, SummaryOilAdmin)
 admin.site.register(SummaryWork, SummaryWorkAdmin)
+admin.site.register(SummaryCarJob, SummaryCarJobAdmin)
