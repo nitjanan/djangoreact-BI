@@ -336,9 +336,9 @@ export interface components {
         };
         Car: {
             readonly id: number;
-            code?: string | null;
+            code: string | null;
             /** ชื่อทะเบียนรถ/เครื่องจักร/หน่วยงาน */
-            name?: string | null;
+            name: string | null;
             /** แผนกทะเบียนรถ/เครื่องจักร/หน่วยงาน */
             car_dep?: number | null;
             /** ชนิดรถ/เครื่องจักร */

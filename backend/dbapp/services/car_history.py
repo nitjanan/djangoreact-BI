@@ -2,6 +2,7 @@
 
 ไม่กรองปี: ดูทุกช่วงที่ sync มา (ค่าซ่อม/ชั่วโมงทำงานมีตั้งแต่ต้นปีก่อนหน้า)
 รถหนึ่งคันแยกตามบริษัท (ทะเบียนเดียวกันอาจอยู่คนละบริษัท) เหมือนตารางรถใน dashboard
+หน้ารวมทุกบริษัทรวมรถคันเดียวกันหลายบริษัทเป็นแถวเดียว: branch_company_id = "06,15"
 """
 
 from datetime import datetime
@@ -20,6 +21,7 @@ from dbapp.services.dashboard import (
     MA_TYPE_NAMES,
     MA_TYPE_PM,
     CompanyAccessDenied,
+    branch_ids,
     car_age,
     doc_repair_events,
     merge_spans,
@@ -68,14 +70,15 @@ def _by_month(queryset, field, func=Sum):
 def build_car_history(user, car_id, branch_company_id, now=None):
     now = now or datetime.now()
     allowed = {str(i) for i in user_companies(user).values_list("id", flat=True)}
-    if str(branch_company_id) not in allowed:
+    company_ids = branch_ids(branch_company_id)
+    if not company_ids or not set(company_ids) <= allowed:
         raise CompanyAccessDenied(branch_company_id)
     car = BaseCar.objects.select_related("car_type", "car_dep").filter(id=car_id).first()
-    company = BaseBranchCompany.objects.filter(id=branch_company_id).first()
-    if car is None or company is None:
+    companies = {str(c.id): c for c in BaseBranchCompany.objects.filter(id__in=company_ids)}
+    if car is None or len(companies) != len(set(company_ids)):
         raise CarNotFound(car_id)
 
-    car_filter = {"car_id": car_id, "branch_company_id": branch_company_id}
+    car_filter = {"car_id": car_id, "branch_company_id__in": company_ids}
     work_model, work_field = work_source(car.car_dep_id)
 
     repair = _by_month(SummaryRepair.objects.filter(**car_filter), "amount")
@@ -171,8 +174,10 @@ def build_car_history(user, car_id, branch_company_id, now=None):
             "car_dep_id": car.car_dep_id,
             "car_dep_name": car.car_dep.name if car.car_dep else None,
             "unit_noun": unit_noun(car.car_dep_id, car.car_dep_id is None),
-            "branch_company_id": str(company.id),
-            "branch_company_name": company.name or "",
+            "branch_company_id": ",".join(company_ids),
+            "branch_company_name": ", ".join(
+                companies[i].name or "" for i in dict.fromkeys(company_ids)
+            ),
         },
         "totals": {
             "repair_total": repair_total,

@@ -119,7 +119,7 @@ def build_open_jobs(base_filter, now=None):
         "has_process": stage_counts[NO_STAGE] < len(jobs),
         "buckets": [
             {"label": label, "count": count}
-            for (label, _), count in zip(AGE_BUCKETS, buckets, strict=True)
+            for (label, _), count in zip(AGE_BUCKETS, buckets)  # noqa: B905 (strict= ต้อง Python 3.10)
         ],
         "stages": [
             {"code": code, "label": label, "count": stage_counts[code]}

@@ -130,6 +130,9 @@ REST_FRAMEWORK = {
         "django_filters.rest_framework.DjangoFilterBackend",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # ตอบ JSON อย่างเดียว: ปิดหน้า Browsable API (DRF 3.14 มีช่องโหว่ XSS ในหน้านี้,
+    # แก้ใน 3.15.1) — React ใช้แค่ JSON, ดู API ผ่าน Swagger ที่ /api/docs/ แทน
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
 }
 
 SPECTACULAR_SETTINGS = {

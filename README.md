@@ -4,7 +4,7 @@ Dashboard รถ/เครื่องจักร (ค่าซ่อม น้
 (Django + Bootstrap 5) เป็น **Django REST Framework + React (TypeScript)**
 
 ```
-backend/    Django 4.2 + DRF  (ใช้ฐานข้อมูล djangodashboarddb ตัวเดิม)
+backend/    Python 3.9.5 + Django 4.2.29 + DRF 3.14  (ใช้ฐานข้อมูล djangodashboarddb ตัวเดิม)
 frontend/   React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui
 ```
 
@@ -52,7 +52,13 @@ src/lib/          ตัวกรองใน URL, format ตัวเลข, ex
 
 ## Backend
 
-ต้องมี [uv](https://docs.astral.sh/uv/) และ MariaDB/MySQL (XAMPP) ที่มีฐาน `djangodashboarddb`
+ต้องมี Python 3.9.5, [uv](https://docs.astral.sh/uv/) และ MariaDB/MySQL (XAMPP) ที่มีฐาน `djangodashboarddb`
+
+เวอร์ชันของ Python และแพ็กเกจล็อกให้ตรงกับ `djangostock` / `djangoweight`
+(Django 4.2.29, DRF 3.14.0, django-filter 2.4.0, django-import-export 2.6.1, mysqlclient 2.0.3,
+whitenoise 5.3.0, gunicorn 20.1.0 ฯลฯ) — ดู `backend/pyproject.toml`
+ถ้าจะใช้ pip แทน uv: `py -3.9 -m venv .venv` แล้ว `.venv\Scripts\pip install -r requirements.txt`
+(อัปเดต `requirements.txt` ทุกครั้งที่แก้ dependency ด้วยคำสั่งในบรรทัดแรกของไฟล์)
 
 ```bash
 cd backend

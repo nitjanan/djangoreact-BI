@@ -16,7 +16,7 @@
 from statistics import median
 
 from dbapp.models import SummaryMaintenance
-from dbapp.services.dashboard import MA_TYPE_BREAKDOWN, to_gregorian
+from dbapp.services.dashboard import MA_TYPE_BREAKDOWN, branch_ids, to_gregorian
 from dbapp.services.insights import (
     COST_PER_HR_FACTOR,
     FUEL_PER_HOUR,
@@ -44,6 +44,11 @@ REASON_WEIGHT = {STALE: 3, COST: 3, REPLACE: 2, REPEAT: 2, FAILURE: 2, FUEL: 1}
 
 def _key(row):
     return (row["car_id"], str(row["branch_company_id"]))
+
+
+def _keys(row):
+    """แถวที่รวมหลายบริษัท (branch_company_id = "06,15") -> key ของแต่ละบริษัท"""
+    return [(row["car_id"], b) for b in branch_ids(row["branch_company_id"])]
 
 
 def _median_of(rows, field, valid):
@@ -115,7 +120,11 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs, noun="รถ", fuel
 
     cars = []
     for row in car_rows:
-        key = _key(row)
+        keys = _keys(row)
+        pairs = sorted(p for k in keys for p in repeats.get(k, []))
+        stale_job = max(
+            (stale[k] for k in keys if k in stale), key=lambda j: j["days"], default=None
+        )
         reasons = []
 
         if (
@@ -148,8 +157,7 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs, noun="รถ", fuel
                 }
             )
 
-        if key in repeats:
-            pairs = repeats[key]
+        if pairs:
             gap = min((b - a).days for a, b in pairs)
             reasons.append(
                 {
@@ -194,8 +202,8 @@ def build_watchlist(car_rows, maintenance_filter, open_jobs, noun="รถ", fuel
                 }
             )
 
-        if key in stale:
-            job = stale[key]
+        if stale_job:
+            job = stale_job
             reasons.append(
                 {
                     "code": STALE,

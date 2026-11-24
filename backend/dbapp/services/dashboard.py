@@ -7,6 +7,8 @@
 - คืนค่าเป็น list/number ล้วน (เดิมบางค่าเป็น json.dumps สำหรับ template)
 """
 
+from __future__ import annotations
+
 import operator
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -361,7 +363,39 @@ def period_filter(year, months):
     return {"year": year, "month__gte": months[0], "month__lte": months[-1]}
 
 
-def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 13)):
+# หน้ารวมทุกบริษัท: รถคันเดียวกันที่ลงข้อมูลไว้หลายบริษัท รวมเป็นแถวเดียว
+# (ยานพาหนะ, รถบรรทุก, เครื่องจักรกลหนัก, รถเจาะ)
+MERGE_COMPANIES_CAR_DEPS = {1, 2, 3, 6}
+BRANCH_ID_SEP = ","
+
+
+def branch_ids(value):
+    """branch_company_id ของแถวรถ -> list ของ id (แถวที่รวมหลายบริษัทเก็บเป็น "06,15")"""
+    return [b for b in str(value or "").split(BRANCH_ID_SEP) if b]
+
+
+def merges_companies(company_code, car_dep_id, company_ids):
+    """ดูทุกบริษัท + แผนกที่รวมรถคันเดียวกันข้ามบริษัท"""
+    return (
+        company_code == ALL_COMPANIES
+        and car_dep_id in MERGE_COMPANIES_CAR_DEPS
+        and len(company_ids) > 1
+    )
+
+
+# ค่าดิบที่บวกกันได้ (ค่าอัตราส่วนคำนวณใหม่หลังรวม)
+_RAW_SUMS = (
+    "repair_total", "oil_total", "km_total", "km_liters",
+    "work_total", "work_days", "failure_count",
+)  # fmt: skip
+_RAW_ONLY = ("work_days", "durations", "spans")
+
+
+def car_table_raw(car_dep_id, year, company_ids, car_type_id, months=range(1, 13)):
+    """ยอดดิบของตารางรถ แถวละ รถ + บริษัท (ทะเบียนเดียวกันอาจอยู่คนละบริษัท)
+
+    คืน (rows, all_durations) ส่งต่อให้ finish_car_table
+    """
     table_filter = {
         "car_dep_id": car_dep_id,
         **period_filter(year, months),
@@ -400,19 +434,15 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
                 "age": car_age(item.get("car__start_year"), year),
                 "car_type_id": item.get("car__car_type_id"),
                 "car_type_name": item.get("car__car_type__name"),
-                "percent_ma": 0.0,
-                "avg_work_per_day": 0.0,
-                "work_total": 0.0,
-                "oil_total": 0.0,
-                "fuel_rate": 0.0,
-                "km_total": 0.0,
-                "liter_per_km": 0.0,
                 "repair_total": 0.0,
-                "repair_cost_per_hr": 0.0,
+                "oil_total": 0.0,
+                "km_total": 0.0,
+                "km_liters": 0.0,
+                "work_total": 0.0,
+                "work_days": 0.0,
                 "failure_count": 0,
-                "mtbf": None,
-                "mttr": None,
-                "downtime_hours": 0.0,
+                "durations": [],
+                "spans": [],
             }
         return rows[key]
 
@@ -444,8 +474,6 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         row["oil_total"] = float(item["oil_total"] or 0)
         row["km_total"] = float(item["km_total"] or 0)
         row["km_liters"] = float(item["km_liters"] or 0)
-        if row["km_total"] > 0:
-            row["liter_per_km"] = row["km_liters"] / row["km_total"]
 
     # ชั่วโมงทำงาน: รถบรรทุก/ยานพาหนะใช้เวลางานในบันทึกการใช้รถ (SummaryCarJob)
     # วันที่ทำงาน (count_diff_time) มาจาก SummaryWork เสมอ
@@ -456,7 +484,7 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         .annotate(work_total=Sum("sum_diff_mile"), work_days=Sum("count_diff_time"))
     ):
         work_items[(item["car_id"], item["branch_company_id"])] = item
-    work_model, work_field = work_source(car_dep_id)
+    work_model, _ = work_source(car_dep_id)
     if work_model is SummaryCarJob:
         for item in work_items.values():
             item["work_total"] = 0
@@ -470,23 +498,11 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
 
     for item in work_items.values():
         row = ensure_row(item)
-        work_total = float(item["work_total"] or 0)
-        work_days = float(item["work_days"] or 0)
-        hours_per_day = hours_per_day_by_car_dep(car_dep_id)
-
-        if work_days > 0:
-            row["avg_work_per_day"] = work_total / work_days
-        if work_total > 0:
-            row["fuel_rate"] = row["oil_total"] / work_total
-            row["repair_cost_per_hr"] = row["repair_total"] / work_total
-        if work_days > 0 and hours_per_day > 0:
-            row["percent_ma"] = work_total / (work_days * hours_per_day) * 100
-        row["work_total"] = work_total
+        row["work_total"] = float(item["work_total"] or 0)
+        row["work_days"] = float(item["work_days"] or 0)
 
     # ใบแจ้งซ่อมประเภท "ซ่อม" ต่อคัน -> MTBF / MTTR
     all_durations = []
-    car_durations = {}
-    car_spans = {}
     for item in SummaryMaintenance.objects.filter(**table_filter, ma_type=MA_TYPE_BREAKDOWN).values(
         *group_fields, "reported_at", "finished_at"
     ):
@@ -495,11 +511,8 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         hours = repair_hours(item["reported_at"], item["finished_at"])
         if hours is not None:
             all_durations.append(hours)
-            key = (item["car_id"], item["branch_company_id"])
-            car_durations.setdefault(key, []).append(hours)
-            car_spans.setdefault(key, []).append(
-                repair_span(item["reported_at"], item["finished_at"])
-            )
+            row["durations"].append(hours)
+            row["spans"].append(repair_span(item["reported_at"], item["finished_at"]))
 
     # รถที่ไม่มีใบแจ้งซ่อม: นับครั้งที่ซ่อมจากใบจ่ายอะไหล่ (ให้ตรงกับส่วนการเสียและเวลาซ่อม)
     doc_fields = [f for f in group_fields if f not in ("car_id", "branch_company_id")]
@@ -507,12 +520,58 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         if not item["is_pm"]:
             ensure_row(item)["failure_count"] += 1
 
-    for key, row in rows.items():
-        row["mtbf"] = cal_mtbf(row["work_total"], row["failure_count"])
-        row["mttr"] = cal_mean(car_durations.get(key, []))
-        row["downtime_hours"] = sum(h for _, h in merge_spans(car_spans.get(key, [])))
+    return list(rows.values()), all_durations
 
-    table_rows = sorted(rows.values(), key=lambda r: (r["code"], r["branch_company_name"]))
+
+def merge_company_rows(raw_rows):
+    """รวมแถวของรถคันเดียวกันที่อยู่หลายบริษัท (บวกค่าดิบ ชื่อบริษัทคั่นด้วย ", ")"""
+    merged = {}
+    for r in sorted(raw_rows, key=lambda r: str(r["branch_company_id"])):
+        m = merged.get(r["car_id"])
+        if m is None:
+            merged[r["car_id"]] = {
+                **r,
+                "branch_company_id": str(r["branch_company_id"]),
+                "durations": list(r["durations"]),
+                "spans": list(r["spans"]),
+            }
+            continue
+        m["branch_company_id"] += BRANCH_ID_SEP + str(r["branch_company_id"])
+        m["branch_company_name"] = ", ".join(
+            n for n in (m["branch_company_name"], r["branch_company_name"]) if n
+        )
+        for field in _RAW_SUMS:
+            m[field] += r[field]
+        m["durations"] += r["durations"]
+        m["spans"] += r["spans"]
+    return list(merged.values())
+
+
+def finish_car_table(raw_rows, all_durations, car_dep_id, merge_companies=False):
+    """ยอดดิบ -> แถวตารางรถ (ค่าอัตราส่วน MTBF/MTTR) + แถวรวม (ไม่แก้ raw_rows)"""
+    if merge_companies:
+        raw_rows = merge_company_rows(raw_rows)
+    hours_per_day = hours_per_day_by_car_dep(car_dep_id)
+    table_rows = []
+    for raw in raw_rows:
+        row = {k: v for k, v in raw.items() if k not in _RAW_ONLY}
+        work_total = row["work_total"]
+        work_days = raw["work_days"]
+        row["percent_ma"] = (
+            work_total / (work_days * hours_per_day) * 100
+            if work_days > 0 and hours_per_day > 0
+            else 0.0
+        )
+        row["avg_work_per_day"] = work_total / work_days if work_days > 0 else 0.0
+        row["fuel_rate"] = row["oil_total"] / work_total if work_total > 0 else 0.0
+        row["repair_cost_per_hr"] = row["repair_total"] / work_total if work_total > 0 else 0.0
+        row["liter_per_km"] = row["km_liters"] / row["km_total"] if row["km_total"] > 0 else 0.0
+        row["mtbf"] = cal_mtbf(work_total, row["failure_count"])
+        row["mttr"] = cal_mean(raw["durations"])
+        row["downtime_hours"] = sum(h for _, h in merge_spans(raw["spans"]))
+        table_rows.append(row)
+
+    table_rows.sort(key=lambda r: (r["code"], r["branch_company_name"]))
     work_sum = sum(r["work_total"] for r in table_rows)
     oil_sum = sum(r["oil_total"] for r in table_rows)
     km_sum = sum(r["km_total"] for r in table_rows)
@@ -539,6 +598,13 @@ def build_car_table(car_dep_id, year, company_ids, car_type_id, months=range(1, 
         "downtime_hours": sum(r["downtime_hours"] for r in table_rows),
     }
     return table_rows, totals
+
+
+def build_car_table(
+    car_dep_id, year, company_ids, car_type_id, months=range(1, 13), merge_companies=False
+):
+    raw_rows, all_durations = car_table_raw(car_dep_id, year, company_ids, car_type_id, months)
+    return finish_car_table(raw_rows, all_durations, car_dep_id, merge_companies)
 
 
 def build_branch_compare(car_rows):
@@ -683,13 +749,15 @@ def available_years(company_ids, selected_year, today):
     return sorted((y for y in years if y), reverse=True)
 
 
-def build_compare(car_dep_id, filters, company_ids, car_type, months, include_unmatched):
+def build_compare(
+    car_dep_id, filters, company_ids, car_type, months, include_unmatched, merge_companies=False
+):
     """ตัวเลขช่วงเดียวกันของปีก่อน (เดือนเดียวกัน) ไว้เทียบกับแผงหัวและแถบตัวเลขสรุป
 
     เทียบระดับตัวกรอง (บริษัท/แผนก/ประเภทรถ) เหมือนแถบตัวเลขสรุปที่ไม่เปลี่ยนตามรถที่เลือก
     """
     year = filters.year - 1
-    _, totals = build_car_table(car_dep_id, year, company_ids, car_type, months)
+    _, totals = build_car_table(car_dep_id, year, company_ids, car_type, months, merge_companies)
     has_data = bool(totals["repair_total"] or totals["work_total"] or totals["failure_count"])
     repair_total = totals["repair_total"]
     if include_unmatched:
@@ -731,17 +799,28 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
     if car_type is not None and car_type not in {ct.id for ct in car_types}:
         car_type = None
 
-    car_rows, car_totals = build_car_table(car_dep_id, filters.year, company_ids, car_type, months)
+    raw_rows, all_durations = car_table_raw(car_dep_id, filters.year, company_ids, car_type, months)
+    # แถวละรถ + บริษัท (ใช้เทียบสาขา)
+    company_rows, company_totals = finish_car_table(raw_rows, all_durations, car_dep_id)
+    # หน้ารวมทุกบริษัท: รถคันเดียวกันหลายบริษัทเป็นแถวเดียว (branch_company_id = "06,15")
+    merge = merges_companies(filters.company, car_dep_id, company_ids)
+    car_rows, car_totals = (
+        finish_car_table(raw_rows, all_durations, car_dep_id, merge_companies=True)
+        if merge
+        else (company_rows, company_totals)
+    )
 
     # เลือกรถด้วย car_id + branch_company_id (code ของรถอาจว่างหรือซ้ำกัน)
+    # รับได้ทั้งบริษัทเดียว (กดจากกราฟ/ใบค้าง) และหลายบริษัท (แถวที่รวมไว้)
     selected_car = None
     if filters.car_id is not None and filters.branch_company_id:
+        wanted = set(branch_ids(filters.branch_company_id))
         selected_car = next(
             (
                 r
                 for r in car_rows
                 if r["car_id"] == filters.car_id
-                and str(r["branch_company_id"]) == str(filters.branch_company_id)
+                and wanted & set(branch_ids(r["branch_company_id"]))
             ),
             None,
         )
@@ -749,13 +828,15 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
         if selected_car is None:
             filters.car_id = None
             filters.branch_company_id = None
+        else:
+            filters.branch_company_id = str(selected_car["branch_company_id"])
 
     base_filter = {"car_dep_id": car_dep_id, **period_filter(filters.year, months)}
     if car_type is not None:
         base_filter["car__car_type_id"] = car_type
     if selected_car:
         base_filter["car_id"] = filters.car_id
-        base_filter["branch_company_id"] = filters.branch_company_id
+        base_filter["branch_company_id__in"] = branch_ids(filters.branch_company_id)
     else:
         base_filter["branch_company_id__in"] = company_ids
 
@@ -960,6 +1041,7 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
             car_type,
             months,
             include_unmatched=is_other and not selected_car,
+            merge_companies=merge,
         ),
     }
     # รถทั้งตาราง (ไม่กรองคันเดียว) เพื่อเทียบค่ากลางเหมือนตารางรถ
@@ -972,7 +1054,7 @@ def build_dashboard(user, filters: DashboardFilters, today=None, now=None):
         table_filter["car__car_type_id"] = car_type
     # เทียบสาขา: เฉพาะตอนดูหลายบริษัทและไม่ได้เลือกคันเดียว
     result["branch_compare"] = (
-        build_branch_compare(car_rows) if len(company_ids) > 1 and not selected_car else []
+        build_branch_compare(company_rows) if len(company_ids) > 1 and not selected_car else []
     )
     result["model_comparison"] = build_model_comparison(car_rows, fuel)
     result["model_benchmark"] = build_model_benchmark(car_rows, selected_car, fuel)

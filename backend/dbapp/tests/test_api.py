@@ -671,3 +671,61 @@ def test_issue_docs_of_type_pm_count_as_pm_not_failures(client):
 
     totals = client.get("/api/car-history/2/", {"branch_company_id": "02"}).json()["totals"]
     assert (totals["breakdown_count"], totals["pm_count"], totals["doc_pm_count"]) == (1, 2, 2)
+
+
+def test_all_companies_merges_same_car_in_several_companies(client, data):
+    co2 = BaseBranchCompany.objects.get(id="02")
+    car1 = BaseCar.objects.get(id=1)
+    common = dict(
+        branch_company=co2, car=car1, car_dep_id=1, year=YEAR, month=2,
+        month_th="กุมภาพันธ์", summary_date=date(YEAR, 2, 1),
+    )  # fmt: skip
+    SummaryRepair.objects.create(**common, repair_name="เครื่องยนต์", amount=300)
+    SummaryWork.objects.create(**common, sum_diff_mile=40, count_diff_time=5, percent=0)
+    # แผนก 1 ใช้ชั่วโมงจากบันทึกการใช้รถ
+    for company, month, hours in ((BaseBranchCompany.objects.get(id="01"), 1, 80), (co2, 2, 40)):
+        SummaryCarJob.objects.create(
+            branch_company=company, car=car1, car_dep_id=1, year=YEAR, month=month,
+            summary_date=date(YEAR, month, 1), expense_dept_id="01", expense_dept_name="งาน",
+            job="ขนส่ง", hours=hours, km=0, trips=1, days=1,
+        )  # fmt: skip
+
+    body = dashboard(client, company="ALL").json()
+    rows = {r["car_id"]: r for r in body["car_table"]["rows"]}
+    assert len(body["car_table"]["rows"]) == 2  # รถ 1 ของสาขา 1 + สาขา 2 เป็นแถวเดียว
+    assert rows[1]["branch_company_id"] == "01,02"
+    assert rows[1]["branch_company_name"] == "สาขา 1, สาขา 2"
+    assert rows[1]["repair_total"] == 1300
+    assert rows[1]["work_total"] == 120
+    assert rows[1]["repair_cost_per_hr"] == pytest.approx(1300 / 120)
+    assert rows[1]["avg_work_per_day"] == pytest.approx(120 / 15)  # วันทำงาน 10 + 5
+    assert rows[1]["failure_count"] == 1
+    assert body["car_table"]["totals"]["repair_total"] == 1800
+    # เทียบสาขายังแยกตามบริษัท
+    branches = {b["branch_company_name"]: b for b in body["branch_compare"]}
+    assert branches["สาขา 2"]["car_count"] == 2
+    assert branches["สาขา 2"]["repair_total"] == 800
+
+    # กดจากกราฟ (บริษัทเดียว) หรือจากแถวที่รวมไว้ ได้รถคันเดียวกันทุกบริษัท
+    for branch in ("01", "01,02"):
+        body = dashboard(client, company="ALL", car_id=1, branch_company_id=branch).json()
+        assert body["selected_car"]["branch_company_id"] == "01,02"
+        assert body["filters"]["branch_company_id"] == "01,02"
+        assert body["charts"]["repair_by_type"]["total"] == 1300
+
+    # ดูบริษัทเดียวไม่รวม
+    rows = dashboard(client, company="C02").json()["car_table"]["rows"]
+    assert {(r["car_id"], r["branch_company_id"]) for r in rows} == {(1, "02"), (2, "02")}
+
+    history = client.get("/api/car-history/1/", {"branch_company_id": "01,02"}).json()
+    assert history["car"]["branch_company_name"] == "สาขา 1, สาขา 2"
+    assert history["totals"]["repair_total"] == 1300
+    assert client.get("/api/car-history/1/", {"branch_company_id": "01,09"}).status_code == 403
+
+
+def test_merge_only_for_vehicle_truck_heavy_machine_and_drill():
+    from dbapp.services.dashboard import merges_companies
+
+    assert [d for d in range(1, 7) if merges_companies("ALL", d, ["01", "02"])] == [1, 2, 3, 6]
+    assert not merges_companies("C01", 1, ["01", "02"])
+    assert not merges_companies("ALL", 1, ["01"])
