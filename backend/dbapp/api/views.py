@@ -1,3 +1,4 @@
+import ipaddress
 from datetime import date
 
 from django.conf import settings
@@ -277,16 +278,35 @@ class SyncSummaryView(APIView):
         return Response({"status": "ok", "result": sync.run_recent_summary_sync()})
 
 
+def _is_local_request(request):
+    """เรียกจากเครื่อง server เอง (127.0.0.1/::1) และไม่ได้ผ่าน reverse proxy
+
+    reverse proxy บนเครื่องเดียวกันทำให้ทุกคำขอดูเหมือนมาจาก 127.0.0.1
+    จึงถือว่าไม่ใช่ local ถ้ามี header ที่ proxy ใส่มา (X-Forwarded-For / Forwarded)
+    """
+    if request.headers.get("X-Forwarded-For") or request.headers.get("Forwarded"):
+        return False
+    try:
+        return ipaddress.ip_address(request.META.get("REMOTE_ADDR", "")).is_loopback
+    except ValueError:
+        return False
+
+
 def update_summary_from_api(request):
     """งานอัปเดตอัตโนมัติทุกวัน (Task Scheduler/cron เรียก): base + ข้อมูลสรุปย้อนหลัง 3 เดือน
 
-    ต้องส่งรหัส SYNC_TOKEN ใน header X-Sync-Token เท่านั้น
-    (ไม่รับใน URL เพราะจะติดไปใน log/ประวัติเบราว์เซอร์ และไม่ใช้ session login
-    เพราะเป็น GET: เว็บอื่นแค่ฝังลิงก์ก็สั่ง sync แทน superuser ได้ — ปุ่มบน dashboard ใช้ /api/sync/)
+    เรียกได้ 2 แบบ (เหมือนระบบเดิมที่เปิด URL บนเครื่อง server ได้เลย):
+    - จากเครื่อง server เอง: http://127.0.0.1:8001/update_summary_from_api/ ไม่ต้องใส่รหัส
+      (เฉพาะเมื่อตั้ง ALLOW_LOCAL_SYNC_WITHOUT_TOKEN=true ใน .env ค่าเริ่มต้นปิด)
+    - จากเครื่องอื่น: ส่งรหัส SYNC_TOKEN ใน header X-Sync-Token เท่านั้น
+      (ไม่รับใน URL เพราะจะติดไปใน log/ประวัติเบราว์เซอร์ และไม่ใช้ session login
+      เพราะเป็น GET: เว็บอื่นแค่ฝังลิงก์ก็สั่ง sync แทน superuser ได้ — ปุ่มบน dashboard ใช้ /api/sync/)
     แต่ละขั้นที่ดึงไม่ได้จะข้ามไป (ดู sync_summary) ตอบเป็นข้อความธรรมดา
     """
     token = request.headers.get("X-Sync-Token", "")
-    if not (settings.SYNC_TOKEN and constant_time_compare(token, settings.SYNC_TOKEN)):
+    has_token = bool(settings.SYNC_TOKEN) and constant_time_compare(token, settings.SYNC_TOKEN)
+    local_ok = settings.ALLOW_LOCAL_SYNC_WITHOUT_TOKEN and _is_local_request(request)
+    if not (has_token or local_ok):
         return HttpResponse("forbidden", status=403, content_type="text/plain; charset=utf-8")
     try:
         result = sync.run_daily_sync()

@@ -21,3 +21,6 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# log ของงานตั้งเวลา (sync_webstock)
+backend/logs/

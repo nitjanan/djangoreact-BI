@@ -10,13 +10,14 @@
 
 from datetime import date
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import CommandError
 
+from dbapp.management.utf8 import Utf8OutputCommand
 from dbapp.reports.period import FREQUENCIES
 from dbapp.reports.send import send_reports
 
 
-class Command(BaseCommand):
+class Command(Utf8OutputCommand):
     help = "ส่งรายงานสรุปรายสัปดาห์/รายเดือน (PDF) ให้ผู้รับที่ตั้งไว้ใน Admin"
 
     def add_arguments(self, parser):

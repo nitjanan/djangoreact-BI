@@ -106,16 +106,51 @@ uv run ruff check . && uv run ruff format .
 
 ### อัปเดตข้อมูลอัตโนมัติทุกวัน
 
-`GET /api/update_summary_from_api/` ดึงข้อมูลหลัก (รถ ชนิด แผนก ประเภทซ่อม) แล้วดึงข้อมูลสรุป
-ย้อนหลัง 3 เดือน (ใบแจ้งซ่อมดึงตั้งแต่ต้นปีก่อนเสมอ) ตอบ `update summary from api success`
+คำสั่ง `sync_webstock` ดึงข้อมูลหลัก (รถ ชนิด แผนก ประเภทซ่อม) แล้วดึงข้อมูลสรุปย้อนหลัง 3 เดือน
+(ใบแจ้งซ่อมดึงตั้งแต่ต้นปีก่อนเสมอ) รันตรงผ่าน Django บนเครื่อง server:
+ไม่ต้องใช้ `SYNC_TOKEN` และไม่ต้องเปิด `runserver` ค้างไว้
 
-1. ตั้ง `SYNC_TOKEN` ใน `backend/.env` เป็นข้อความสุ่มยาว ๆ แล้ว restart Django
-   (ไม่ตั้ง = ปิดใช้งาน) ส่งรหัสใน header `X-Sync-Token` เท่านั้น ไม่รับใน URL
-2. Windows Task Scheduler: Daily 06:00 (ก่อนรายงาน 07:00), Program `curl.exe`,
-   Arguments `-fsS -H "X-Sync-Token: <SYNC_TOKEN>" http://127.0.0.1:8001/api/update_summary_from_api/`
+```powershell
+cd backend
+uv run python manage.py sync_webstock              # ย้อนหลัง 3 เดือน (ใช้ตั้งเวลา)
+uv run python manage.py sync_webstock --months 6   # ย้อนหลัง 6 เดือน
+uv run python manage.py sync_webstock --full       # ตั้งแต่ต้นปี เหมือนปุ่ม "อัปเดตข้อมูล"
+```
 
-ตอบ 403 = รหัสไม่ถูก · 503 = ยังไม่ได้ตั้งค่า webstock · 502 = ดึงไม่ได้เลยสักขั้น
-(ขั้นที่ดึงไม่ได้บางขั้นจะข้ามไปและเก็บข้อมูลเดิมไว้)
+พิมพ์ผลทีละขั้น (ผ่าน/ล้ม) ขั้นที่ดึงไม่ได้จะข้ามไปและเก็บข้อมูลเดิมไว้
+แต่คำสั่งจะจบด้วย exit code 1 ให้ Task Scheduler แสดงว่ารอบนั้นไม่สำเร็จ (ดูสาเหตุใน output: `webstock API error ...`)
+
+Windows Task Scheduler บนเครื่อง server (Create Task):
+
+| ช่อง | ค่า |
+|---|---|
+| General | Run whether user is logged on or not |
+| Trigger | Daily 06:00 (ก่อนรายงานอีเมล 07:00) |
+| Program/script | `uv` (ถ้า Task Scheduler หาไม่เจอ ใส่ path เต็ม ดูได้จาก `(Get-Command uv).Source`) |
+| Add arguments | `run python manage.py sync_webstock` |
+| Start in | โฟลเดอร์ `backend` เช่น `C:\...leet-dashboardackend` (ต้องมี `.env` อยู่ในนี้) |
+
+เก็บ log ไว้ดูย้อนหลัง: Program `cmd.exe`, Arguments
+`/c uv run python manage.py sync_webstock >> logs\sync_webstock.log 2>&1` (สร้างโฟลเดอร์ `backend\logs` ก่อน)
+
+ทดสอบงานที่ตั้งไว้: คลิกขวา > Run แล้วดูคอลัมน์ Last Run Result (`0x0` = สำเร็จทุกขั้น, `0x1` = มีขั้นที่ล้ม)
+
+#### เรียกผ่าน URL (แบบระบบเดิม)
+
+`GET /update_summary_from_api/` (หรือ `/api/update_summary_from_api/`) ทำงานเหมือนคำสั่ง `sync_webstock`
+ใช้ path เดียวกับระบบเดิม (djangodashboard) ต้องเปิด Django ค้างไว้
+
+- **บนเครื่อง server เอง** เปิด URL ได้โดยไม่ต้องใส่รหัส เมื่อตั้ง `ALLOW_LOCAL_SYNC_WITHOUT_TOKEN=true`
+  ใน `backend/.env` แล้ว restart Django (ค่าเริ่มต้นปิด = ต้องใส่รหัสทุกเครื่อง):
+  `curl.exe -fsS http://127.0.0.1:8001/update_summary_from_api/`
+- **จากเครื่องอื่น** ต้องตั้ง `SYNC_TOKEN` ใน `backend/.env` แล้วส่งใน header `X-Sync-Token` เท่านั้น (ไม่รับใน URL):
+  `curl.exe -fsS -H "X-Sync-Token: <SYNC_TOKEN>" http://<server>:8001/update_summary_from_api/`
+
+คำขอที่ผ่าน reverse proxy (มี header `X-Forwarded-For`/`Forwarded`) ไม่นับเป็นเครื่อง server แม้ proxy อยู่เครื่องเดียวกัน
+ถ้าเปิดเว็บผ่าน IIS/nginx ให้ตรวจว่า proxy ส่ง `X-Forwarded-For` ทุกคำขอก่อนเปิดสวิตช์ ไม่อย่างนั้นใครก็สั่งดึงข้อมูลผ่าน proxy ได้โดยไม่ต้องมีรหัส
+
+ตอบ 403 = รหัสไม่ถูก (และไม่ได้เปิดสวิตช์/ไม่ได้เรียกจากเครื่อง server) · 503 = ยังไม่ได้ตั้งค่า webstock · 502 = ดึงไม่ได้เลยสักขั้น
+(ดึงไม่ได้บางขั้นยังตอบ 200 — ถ้าต้องการรู้ทุกขั้นใช้คำสั่ง `sync_webstock` แทน)
 
 ค่าซ่อม/น้ำมัน/ชั่วโมงทำงานเก็บเป็นรายเดือน รายงานรายสัปดาห์จึงแสดงเป็นยอดสะสมของเดือน
 ส่วนการแจ้งซ่อม/ปิดงานนับตามวันที่จริง · ฟอนต์ IBM Plex Sans Thai (OFL) อยู่ใน `dbapp/reports/fonts`

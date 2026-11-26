@@ -16,8 +16,13 @@ def env_bool(name, default=False):
     return os.environ.get(name, str(default)).lower() in ("1", "true", "yes", "on")
 
 
+def env_str(name, default=""):
+    """ค่าว่างใน .env (เช่น EMAIL_PORT=) ถือว่าไม่ได้ตั้ง ใช้ค่าเริ่มต้นแทน"""
+    return os.environ.get(name) or default
+
+
 def env_list(name, default=""):
-    return [v.strip() for v in os.environ.get(name, default).split(",") if v.strip()]
+    return [v.strip() for v in env_str(name, default).split(",") if v.strip()]
 
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-dev-only-change-me")
@@ -156,14 +161,14 @@ CSRF_COOKIE_NAME = "fleet_csrftoken"
 CSRF_COOKIE_HTTPONLY = False  # React ต้องอ่าน cookie นี้เพื่อส่ง X-CSRFToken
 
 # --- Email (reset password) ---
-EMAIL_BACKEND = os.environ.get(
+EMAIL_BACKEND = env_str(
     "EMAIL_BACKEND",
     "django.core.mail.backends.console.EmailBackend"
     if DEBUG
     else "django.core.mail.backends.smtp.EmailBackend",
 )
-EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp-relay.brevo.com")
-EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST = env_str("EMAIL_HOST", "smtp-relay.brevo.com")
+EMAIL_PORT = int(env_str("EMAIL_PORT", "587"))
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
@@ -177,6 +182,9 @@ MAINTENANCE_API_BASE = os.environ.get("MAINTENANCE_API_BASE", "") or None
 CARLOG_JOBS_API_BASE = os.environ.get("CARLOG_JOBS_API_BASE", "") or None
 # รหัสลับของงานอัปเดตอัตโนมัติ (/api/update_summary_from_api/, header X-Sync-Token) ว่าง = ปิด
 SYNC_TOKEN = os.environ.get("SYNC_TOKEN", "")
+# เปิด = เรียก update_summary_from_api จากเครื่อง server เอง (127.0.0.1) ได้โดยไม่ต้องใส่ SYNC_TOKEN
+# (แบบระบบเดิม) เปิดเฉพาะเมื่อ reverse proxy บนเครื่องนี้ (ถ้ามี) ส่ง X-Forwarded-For ทุกคำขอ
+ALLOW_LOCAL_SYNC_WITHOUT_TOKEN = env_bool("ALLOW_LOCAL_SYNC_WITHOUT_TOKEN", False)
 
 # dev: เสิร์ฟ static จาก app โดยไม่ต้อง collectstatic
 WHITENOISE_USE_FINDERS = DEBUG

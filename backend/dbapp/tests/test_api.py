@@ -199,19 +199,20 @@ def test_update_summary_from_api_needs_token_and_returns_text(client, data, sett
         lambda: calls.append(1) or {"base": {"car": True}, "summary": {"repair": False}},
     )
     url = "/api/update_summary_from_api/"
+    remote = {"REMOTE_ADDR": "10.0.0.5"}  # เครื่องอื่นในเครือข่าย
     settings.SYNC_TOKEN = ""
-    assert client.get(url, HTTP_X_SYNC_TOKEN="").status_code == 403  # ยังไม่ตั้งรหัส: ปิด
+    assert client.get(url, HTTP_X_SYNC_TOKEN="", **remote).status_code == 403  # ยังไม่ตั้งรหัส: ปิด
 
     settings.SYNC_TOKEN = "s3cret"
-    assert client.get(url, HTTP_X_SYNC_TOKEN="wrong").status_code == 403
-    assert client.get(url, {"token": "s3cret"}).status_code == 403  # ไม่รับรหัสใน URL
+    assert client.get(url, HTTP_X_SYNC_TOKEN="wrong", **remote).status_code == 403
+    assert client.get(url, {"token": "s3cret"}, **remote).status_code == 403  # ไม่รับรหัสใน URL
     from django.contrib.auth import get_user_model
 
     superuser = get_user_model().objects.create_superuser("admin2", password="x")
     client.force_login(superuser)
-    assert client.get(url).status_code == 403  # GET ไม่ใช้ session (กัน CSRF)
+    assert client.get(url, **remote).status_code == 403  # GET ไม่ใช้ session (กัน CSRF)
     assert calls == []
-    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret")
+    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret", **remote)
     assert (res.status_code, res.content.decode()) == (200, "update summary from api success")
     assert len(calls) == 1
 
@@ -219,8 +220,43 @@ def test_update_summary_from_api_needs_token_and_returns_text(client, data, sett
     monkeypatch.setattr(
         sync, "run_daily_sync", lambda: {"base": {"car": False}, "summary": {"repair": False}}
     )
-    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret")
+    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret", **remote)
     assert res.status_code == 502 and "car, repair" in res.content.decode()
+
+
+def test_update_summary_from_api_without_token_only_on_the_server(client, settings, monkeypatch):
+    # เหมือนระบบเดิม: เปิด URL บนเครื่อง server ได้เลย (Task Scheduler) แต่เครื่องอื่นต้องมีรหัส
+    from dbapp.services import sync
+
+    calls = []
+    monkeypatch.setattr(
+        sync,
+        "run_daily_sync",
+        lambda: calls.append(1) or {"base": {"car": True}, "summary": {"repair": True}},
+    )
+    settings.SYNC_TOKEN = ""
+    # สวิตช์ปิด (ค่าเริ่มต้น): เครื่อง server เองก็ต้องมีรหัส
+    settings.ALLOW_LOCAL_SYNC_WITHOUT_TOKEN = False
+    assert client.get("/update_summary_from_api/", REMOTE_ADDR="127.0.0.1").status_code == 403
+    assert calls == []
+
+    settings.ALLOW_LOCAL_SYNC_WITHOUT_TOKEN = True
+    for url in ("/update_summary_from_api/", "/api/update_summary_from_api/"):
+        for addr in ("127.0.0.1", "::1"):
+            res = client.get(url, REMOTE_ADDR=addr)
+            assert (res.status_code, res.content.decode()) == (
+                200,
+                "update summary from api success",
+            )
+    assert len(calls) == 4
+
+    assert client.get("/update_summary_from_api/", REMOTE_ADDR="192.168.1.20").status_code == 403
+    # ผ่าน reverse proxy บนเครื่องเดียวกัน (REMOTE_ADDR เป็น 127.0.0.1) ไม่นับเป็นเครื่อง server
+    proxied = client.get(
+        "/update_summary_from_api/", REMOTE_ADDR="127.0.0.1", HTTP_X_FORWARDED_FOR="203.0.113.9"
+    )
+    assert proxied.status_code == 403
+    assert len(calls) == 4
 
 
 def test_daily_sync_runs_base_then_recent_summary(monkeypatch):
