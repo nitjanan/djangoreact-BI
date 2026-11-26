@@ -1,0 +1,163 @@
+# ตรวจโปรเจกต์ทุกครั้งที่เปิด/อัปเดต PR เข้า main และทุกครั้งที่มี commit ลง main (แบบเดียวกับ djangostock)
+#
+#   backend  (backend/)
+#     1) ลง dependency จาก uv.lock ได้ครบ (--locked : pyproject.toml แก้แล้วลืม uv lock = แดง)
+#     2) ruff check / ruff format --check ผ่าน
+#     3) migration ทุกไฟล์รันบน MariaDB ว่าง ๆ ได้จนจบ (MariaDB 10.4 เหมือน XAMPP ที่ใช้จริง)
+#     4) manage.py check ผ่าน และไม่มี model ที่แก้แล้วลืมสร้างไฟล์ migration
+#     5) pytest ผ่านทั้งหมด (ใช้ settings_test = SQLite ในหน่วยความจำ)
+#     6) requirements.txt ตรงกับ uv.lock (ไฟล์นี้ใช้ติดตั้งแบบ pip บน server)
+#   frontend (frontend/)
+#     1) npm ci / oxlint / tsc / vite build ผ่าน
+#     2) src/api/schema.d.ts ตรงกับ API ของ backend (แก้ API แล้วลืม npm run gen:api = แดง)
+#
+# กดรันเองได้จากแท็บ Actions (workflow_dispatch) หลังไฟล์นี้อยู่บน main แล้ว
+name: django checks DB
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# push ซ้อนกันใน branch/PR เดียวกัน ยกเลิกรอบเก่า ไม่ต้องรอให้จบ
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  backend:
+    name: backend (django)
+    # ล็อก ubuntu-24.04 : ubuntu-latest เป็น 26.04 แล้ว (ตรงกับ djangostock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      # MariaDB 10.4 เหมือน XAMPP บนเครื่อง dev/server ใช้แค่ในรอบนี้ ทิ้งไปพร้อมเครื่อง CI
+      mariadb:
+        image: mariadb:10.4
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: djangodashboarddb
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DB_ENGINE: mysql
+      DB_NAME: djangodashboarddb
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv อ่าน backend/.python-version (3.9.5) แล้วโหลด Python รุ่นนั้นมาให้เอง
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # mysqlclient 2.0.3 ไม่มี wheel บน Linux ต้อง build เอง ต้องมี mysql_config
+      - name: Install MySQL client headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev pkg-config
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      # --skip-checks : ให้ migrate สร้างตารางก่อน system check จะโหลด urls (กันโค้ดที่ query ตอน import)
+      - name: Apply migrations to an empty MariaDB
+        run: uv run python manage.py migrate --skip-checks --noinput
+
+      - name: Django system check
+        run: uv run python manage.py check
+
+      # แก้ model แล้วลืมสร้างไฟล์ migration = พังตอน deploy ดักไว้ตรงนี้
+      - name: Check for missing migrations
+        run: uv run python manage.py makemigrations --check --dry-run
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      # server ติดตั้งด้วย pip จาก requirements.txt ถ้าไม่ตรงกับ uv.lock = ของบน server ไม่ตรงกับที่เทสต์
+      - name: requirements.txt matches uv.lock
+        run: |
+          uv export --no-hashes --no-dev --no-header --no-emit-project -o /tmp/requirements.txt
+          if ! diff <(grep -v '^#' requirements.txt) <(grep -v '^#' /tmp/requirements.txt); then
+            echo "::error file=backend/requirements.txt::requirements.txt ไม่ตรงกับ uv.lock รันคำสั่งในบรรทัดแรกของไฟล์ใหม่"
+            exit 1
+          fi
+
+  frontend:
+    name: frontend (react)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # สร้าง schema ใหม่จากโค้ด backend แล้วเทียบกับ src/api/schema.d.ts ที่ commit ไว้
+      # (คำสั่งเดียวกับ npm run gen:api แต่เขียนลง /tmp ไม่ทับไฟล์ในโปรเจกต์)
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install MySQL client headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev pkg-config
+
+      - name: API types match backend schema
+        run: |
+          (cd ../backend && uv sync --locked && \
+            uv run python manage.py spectacular --settings config.settings_test --validate --file /tmp/schema.yml)
+          npx --yes openapi-typescript@7.13.0 /tmp/schema.yml -o /tmp/schema.d.ts
+          if ! diff -u src/api/schema.d.ts /tmp/schema.d.ts; then
+            echo "::error file=frontend/src/api/schema.d.ts::API ของ backend เปลี่ยนแต่ยังไม่ได้สร้าง type ใหม่ รัน npm run gen:api แล้ว commit"
+            exit 1
+          fi
