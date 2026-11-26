@@ -1,0 +1,159 @@
+# ตรวจความปลอดภัย แยกจาก ci.yml (แบบเดียวกับ djangostock)
+#
+# หลัก : บล็อก PR เฉพาะ "ปัญหาใหม่" ที่ PR นั้นพามา ปัญหาเก่าที่มีอยู่แล้วรายงานไว้ในหน้า Summary
+# ไม่งั้น CI จะแดงตั้งแต่วันแรกแล้วทุกคนจะชินจนไม่ดูอีก
+#
+#   job           เครื่องมือ                   บล็อก PR ไหม
+#   secrets       gitleaks                 บล็อก  : PR สแกนเฉพาะ commit ใหม่ เจอ token/รหัสผ่านใหม่ = แดง
+#                                                 schedule/กดเอง สแกนทั้งประวัติ
+#   code          bandit                   บล็อก  : ปัญหาระดับ medium ขึ้นไป (ตอนนี้ไม่มีเลย จึงยังไม่ต้องมี baseline)
+#   python-deps   pip-audit                ไม่บล็อก : ช่องโหว่ใน backend/requirements.txt ขึ้นเป็น warning + ตารางใน Summary
+#                                                 (เวอร์ชันล็อกให้ตรงกับ djangostock / djangoweight แก้ทีละตัวไม่ได้)
+#   node-deps     npm audit                ไม่บล็อก : ช่องโหว่ในแพ็กเกจของ frontend ขึ้นเป็น warning + Summary
+#   django-deploy manage.py check --deploy ไม่บล็อก : ค่า settings ที่ไม่ควรขึ้น production (DEBUG / SECRET_KEY / HTTPS)
+#
+# ไม่มี CodeQL : repo นี้เป็น private ต้องมี GitHub Advanced Security ถึงจะใช้ได้
+#
+# รันทุกสัปดาห์ด้วย เพราะช่องโหว่ใหม่ของแพ็กเกจประกาศออกมาได้ทุกวันโดยที่เราไม่ได้แก้โค้ดเลย
+name: security checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 1 * * 1'   # จันทร์ 08:00 เวลาไทย (schedule รันจาก main เท่านั้น)
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: secrets (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write   # gitleaks คอมเมนต์ใน PR ตรงบรรทัดที่เจอ
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # ต้องมีประวัติทั้งหมด ไม่งั้นสแกน commit ใน PR ไม่ได้
+      # action จากภายนอก + มีสิทธิ์เขียน PR : pin ด้วย commit SHA กัน tag ถูกย้ายไปชี้โค้ดอื่น
+      # (repo ของบัญชีส่วนตัวใช้ฟรี ถ้าย้ายไป organization ต้องตั้ง secret GITLEAKS_LICENSE)
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  code:
+    name: code (bandit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'   # แค่รันเครื่องมือ ไม่ได้ติดตั้งโปรเจกต์
+      - run: pip install bandit
+      # -s B105,B106,B107 : ข้ามเรื่องรหัสผ่านที่เขียนตรงในโค้ด ให้ gitleaks ดูแทน
+      # ถ้าวันหนึ่งมีปัญหาเก่าที่ยังแก้ไม่ได้ สร้าง baseline ด้วย -f json -o .github/bandit-baseline.json
+      # แล้วเพิ่ม -b .github/bandit-baseline.json (เหมือน djangostock)
+      - name: Scan for issues
+        working-directory: backend
+        run: >-
+          bandit -r config dbapp
+          -x '*/migrations/*,*/tests/*'
+          -s B105,B106,B107
+          --severity-level medium
+
+  python-deps:
+    name: python deps (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pip-audit
+      # --no-deps --disable-pip : เวอร์ชันล็อกไว้ครบทุกตัวแล้ว (uv export) เช็คกับฐานข้อมูลช่องโหว่ตรง ๆ
+      - name: Audit backend/requirements.txt
+        run: |
+          status=0
+          pip-audit -r backend/requirements.txt --no-deps --disable-pip --progress-spinner off \
+            -f markdown -o audit.md || status=$?
+          {
+            echo '## pip-audit : ช่องโหว่ในแพ็กเกจ Python'
+            cat audit.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" != 0 ]; then
+            echo "::warning title=pip-audit::พบช่องโหว่ในแพ็กเกจของ backend/requirements.txt ดูตารางในหน้า Summary ของ run นี้"
+          fi
+
+  node-deps:
+    name: node deps (npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      # อ่านจาก package-lock.json อย่างเดียว ไม่ต้อง npm ci
+      - name: Audit frontend/package-lock.json
+        run: |
+          status=0
+          npm audit > audit.txt 2>&1 || status=$?
+          {
+            echo '## npm audit : ช่องโหว่ในแพ็กเกจ frontend'
+            echo '```'
+            cat audit.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" != 0 ]; then
+            echo "::warning title=npm audit::พบช่องโหว่ในแพ็กเกจของ frontend ดูรายละเอียดในหน้า Summary ของ run นี้"
+          fi
+
+  django-deploy:
+    name: django check --deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # ตรวจค่า settings แบบ production (DEBUG ปิด) ไม่ต้องใช้ฐานจริง ใช้ SQLite แทน
+      DB_ENGINE: sqlite
+      DJANGO_DEBUG: 'false'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Install MySQL client headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient-dev pkg-config
+      - run: uv sync --locked
+      # คำเตือนระดับ WARNING ไม่ทำให้ job แดง (fail-level ค่าเริ่มต้น = ERROR) อ่านผลจาก Summary
+      - name: Deploy settings check
+        run: |
+          set -o pipefail
+          uv run python manage.py check --deploy 2>&1 | tee deploy-check.txt
+          {
+            echo '## manage.py check --deploy'
+            echo '```'
+            cat deploy-check.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
