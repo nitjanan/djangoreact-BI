@@ -310,8 +310,13 @@ def update_summary_from_api(request):
         return HttpResponse("forbidden", status=403, content_type="text/plain; charset=utf-8")
     try:
         result = sync.run_daily_sync()
-    except WebstockNotConfigured as e:
-        return HttpResponse(str(e), status=503, content_type="text/plain; charset=utf-8")
+    except WebstockNotConfigured:
+        # ส่งข้อความคงที่ ไม่ใช่ str(exception) กันรายละเอียดภายในหลุดออกไป (CodeQL py/stack-trace-exposure)
+        return HttpResponse(
+            str(WebstockNotConfigured.default_detail),
+            status=503,
+            content_type="text/plain; charset=utf-8",
+        )
     steps = {**result["base"], **result["summary"]}
     if not any(steps.values()):
         # ไม่ได้ข้อมูลเลยสักขั้น (webstock ล่ม/login ไม่ได้) ให้ scheduler เห็นว่าไม่สำเร็จ
