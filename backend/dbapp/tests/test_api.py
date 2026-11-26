@@ -223,6 +223,17 @@ def test_update_summary_from_api_needs_token_and_returns_text(client, data, sett
     res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret", **remote)
     assert res.status_code == 502 and "car, repair" in res.content.decode()
 
+    # ยังไม่ได้ตั้งค่า webstock: บอกวิธีตั้งค่า (ข้อความคงที่ ไม่ส่งรายละเอียด exception ออกไป)
+    from dbapp.services.external_api import WebstockNotConfigured
+
+    def not_configured():
+        raise WebstockNotConfigured
+
+    monkeypatch.setattr(sync, "run_daily_sync", not_configured)
+    res = client.get(url, HTTP_X_SYNC_TOKEN="s3cret", **remote)
+    assert res.status_code == 503
+    assert res.content.decode() == str(WebstockNotConfigured.default_detail)
+
 
 def test_update_summary_from_api_without_token_only_on_the_server(client, settings, monkeypatch):
     # เหมือนระบบเดิม: เปิด URL บนเครื่อง server ได้เลย (Task Scheduler) แต่เครื่องอื่นต้องมีรหัส
