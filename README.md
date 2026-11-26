@@ -56,7 +56,7 @@ src/lib/          ตัวกรองใน URL, format ตัวเลข, ex
 
 เวอร์ชันของ Python และแพ็กเกจล็อกให้ตรงกับ `djangostock` / `djangoweight`
 (Django 4.2.29, DRF 3.14.0, django-filter 2.4.0, django-import-export 2.6.1, mysqlclient 2.0.3,
-whitenoise 5.3.0, gunicorn 20.1.0 ฯลฯ) — ดู `backend/pyproject.toml`
+whitenoise 5.3.0 ฯลฯ) ยกเว้น gunicorn 23.0.0 (20.1.0 มีช่องโหว่ HTTP request smuggling) — ดู `backend/pyproject.toml`
 ถ้าจะใช้ pip แทน uv: `py -3.9 -m venv .venv` แล้ว `.venv\Scripts\pip install -r requirements.txt`
 (อัปเดต `requirements.txt` ทุกครั้งที่แก้ dependency ด้วยคำสั่งในบรรทัดแรกของไฟล์)
 
