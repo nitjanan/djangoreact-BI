@@ -66,10 +66,11 @@ jobs:
       DB_PORT: '3306'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # uv อ่าน backend/.python-version (3.9.5) แล้วโหลด Python รุ่นนั้นมาให้เอง
-      - uses: astral-sh/setup-uv@v6
+      # setup-uv ตั้งแต่ v8 ไม่มี tag @v10 ให้แล้ว ต้อง pin เวอร์ชันเต็ม ใช้ commit SHA กัน tag ถูกย้าย (อัปเดตด้วยมือ/Dependabot)
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -120,9 +121,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
@@ -142,7 +143,7 @@ jobs:
 
       # สร้าง schema ใหม่จากโค้ด backend แล้วเทียบกับ src/api/schema.d.ts ที่ commit ไว้
       # (คำสั่งเดียวกับ npm run gen:api แต่เขียนลง /tmp ไม่ทับไฟล์ในโปรเจกต์)
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
