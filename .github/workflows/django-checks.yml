@@ -12,7 +12,7 @@
 #     2) src/api/schema.d.ts ตรงกับ API ของ backend (แก้ API แล้วลืม npm run gen:api = แดง)
 #
 # กดรันเองได้จากแท็บ Actions (workflow_dispatch) หลังไฟล์นี้อยู่บน main แล้ว
-name: ci
+name: django checks DB
 
 on:
   push:

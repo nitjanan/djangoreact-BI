@@ -1,4 +1,4 @@
-# ตรวจความปลอดภัย แยกจาก ci.yml (แบบเดียวกับ djangostock)
+# ตรวจความปลอดภัย แยกจาก django-checks.yml (แบบเดียวกับ djangostock)
 #
 # หลัก : บล็อก PR เฉพาะ "ปัญหาใหม่" ที่ PR นั้นพามา ปัญหาเก่าที่มีอยู่แล้วรายงานไว้ในหน้า Summary
 # ไม่งั้น CI จะแดงตั้งแต่วันแรกแล้วทุกคนจะชินจนไม่ดูอีก
@@ -6,7 +6,7 @@
 #   job           เครื่องมือ                   บล็อก PR ไหม
 #   secrets       gitleaks                 บล็อก  : PR สแกนเฉพาะ commit ใหม่ เจอ token/รหัสผ่านใหม่ = แดง
 #                                                 schedule/กดเอง สแกนทั้งประวัติ
-#   code          bandit                   บล็อก  : ปัญหาระดับ medium ขึ้นไป (ตอนนี้ไม่มีเลย จึงยังไม่ต้องมี baseline)
+#   code          bandit                   บล็อก  : เฉพาะปัญหาใหม่ระดับ medium ขึ้นไป เทียบกับ .github/bandit-baseline.json
 #   python-deps   pip-audit                ไม่บล็อก : ช่องโหว่ใน backend/requirements.txt ขึ้นเป็น warning + ตารางใน Summary
 #                                                 (เวอร์ชันล็อกให้ตรงกับ djangostock / djangoweight แก้ทีละตัวไม่ได้)
 #   node-deps     npm audit                ไม่บล็อก : ช่องโหว่ในแพ็กเกจของ frontend ขึ้นเป็น warning + Summary
@@ -62,14 +62,16 @@ jobs:
           python-version: '3.12'   # แค่รันเครื่องมือ ไม่ได้ติดตั้งโปรเจกต์
       - run: pip install bandit
       # -s B105,B106,B107 : ข้ามเรื่องรหัสผ่านที่เขียนตรงในโค้ด ให้ gitleaks ดูแทน
-      # ถ้าวันหนึ่งมีปัญหาเก่าที่ยังแก้ไม่ได้ สร้าง baseline ด้วย -f json -o .github/bandit-baseline.json
-      # แล้วเพิ่ม -b .github/bandit-baseline.json (เหมือน djangostock)
-      - name: Scan for issues
-        working-directory: backend
+      #   ถ้าให้ bandit ดูด้วย ไฟล์ baseline จะต้องเก็บค่า secret จริงไว้ (bandit เทียบด้วยข้อความที่มีค่านั้นอยู่)
+      # -b : ปัญหาที่มีอยู่แล้วใน baseline ไม่นับ (ตอนนี้ baseline ว่าง = ไม่มีปัญหาเก่าเลย)
+      #      สร้าง baseline ใหม่ได้ด้วยคำสั่งเดียวกันแต่เปลี่ยน -b เป็น -f json -o .github/bandit-baseline.json
+      #      รันจาก root ของ repo และถ้าสร้างบน Windows ให้เปลี่ยน \ ในชื่อไฟล์เป็น / ก่อน commit
+      - name: Scan for new issues
         run: >-
-          bandit -r config dbapp
+          bandit -r backend/config backend/dbapp
           -x '*/migrations/*,*/tests/*'
           -s B105,B106,B107
+          -b .github/bandit-baseline.json
           --severity-level medium
 
   python-deps:
