@@ -7,12 +7,12 @@
 #   secrets       gitleaks                 บล็อก  : PR สแกนเฉพาะ commit ใหม่ เจอ token/รหัสผ่านใหม่ = แดง
 #                                                 schedule/กดเอง สแกนทั้งประวัติ
 #   code          bandit                   บล็อก  : เฉพาะปัญหาใหม่ระดับ medium ขึ้นไป เทียบกับ .github/bandit-baseline.json
+#   codeql        GitHub CodeQL            ไม่บล็อก : ผลขึ้นแท็บ Security > Code scanning (repo public ใช้ฟรี)
+#                                                 สแกน Python (backend) / TypeScript (frontend) / ไฟล์ workflow เอง
 #   python-deps   pip-audit                ไม่บล็อก : ช่องโหว่ใน backend/requirements.txt ขึ้นเป็น warning + ตารางใน Summary
 #                                                 (เวอร์ชันล็อกให้ตรงกับ djangostock / djangoweight แก้ทีละตัวไม่ได้)
 #   node-deps     npm audit                ไม่บล็อก : ช่องโหว่ในแพ็กเกจของ frontend ขึ้นเป็น warning + Summary
 #   django-deploy manage.py check --deploy ไม่บล็อก : ค่า settings ที่ไม่ควรขึ้น production (DEBUG / SECRET_KEY / HTTPS)
-#
-# ไม่มี CodeQL : repo นี้เป็น private ต้องมี GitHub Advanced Security ถึงจะใช้ได้
 #
 # รันทุกสัปดาห์ด้วย เพราะช่องโหว่ใหม่ของแพ็กเกจประกาศออกมาได้ทุกวันโดยที่เราไม่ได้แก้โค้ดเลย
 name: security checks
@@ -73,6 +73,28 @@ jobs:
           -s B105,B106,B107
           -b .github/bandit-baseline.json
           --severity-level medium
+
+  codeql:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write   # ส่งผลขึ้นแท็บ Security
+    strategy:
+      fail-fast: false
+      matrix:
+        # actions = ตรวจไฟล์ใน .github/workflows เอง (เช่น สิทธิ์ token กว้างเกิน / script injection)
+        language: [python, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none   # ทั้ง 3 ภาษาไม่ต้อง build
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
 
   python-deps:
     name: python deps (pip-audit)
