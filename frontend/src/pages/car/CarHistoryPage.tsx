@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronRight, CircleAlert } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleAlert } from 'lucide-react'
 import { useState } from 'react'
 import Chart from 'react-apexcharts'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
@@ -8,15 +8,26 @@ import { useCarHistory } from '@/api/hooks'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { seriesRows } from '@/lib/export-excel'
+import { pieRows, seriesRows } from '@/lib/export-excel'
 import { num } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { ChartCard } from '@/pages/dashboard/ChartCard'
-import { COLOR, PALETTE, baseOptions, comboOptions } from '@/pages/dashboard/chart-theme'
+import {
+  CATEGORY_COLORS,
+  COLOR,
+  PALETTE,
+  TEXT,
+  baht,
+  baseOptions,
+  comboOptions,
+  kilo,
+} from '@/pages/dashboard/chart-theme'
 import { ExportFiltersContext, NounContext } from '@/pages/dashboard/export-context'
+import { JobsSummary } from '@/pages/dashboard/Jobs'
 import { Kpi, KpiStrip } from '@/pages/dashboard/Kpi'
 import { PartsDetails } from '@/pages/dashboard/Parts'
 import { Section } from '@/pages/dashboard/Section'
+import { MONTHS_SHORT } from '@/pages/dashboard/period'
 
 type Ticket = Schemas['CarHistoryTicket']
 
@@ -88,6 +99,14 @@ export default function CarHistoryPage() {
           >
             <CarHeader data={data} />
             <Totals data={data} />
+            {data.jobs.departments.length > 0 && (
+              <Section
+                title="งานที่ทำ แยกตามแผนกค่าใช้จ่าย"
+                description={`จากบันทึกการใช้${data.car.unit_noun}ใน webstock ทุกช่วงที่มีข้อมูล · ชั่วโมง = เวลาเริ่ม-จบของแต่ละงาน`}
+              >
+                <JobsSummary data={data.jobs} singleCar />
+              </Section>
+            )}
             <Monthly data={data} />
             <RepairCosts items={data.repair_items} />
             <Timeline tickets={data.tickets} />
@@ -235,10 +254,16 @@ function Monthly({ data }: { data: Schemas['CarHistory'] }) {
   )
 }
 
+/** แสดงใบแจ้งซ่อมล่าสุดกี่ใบก่อนกด "แสดงเพิ่ม" */
+const TIMELINE_PREVIEW = 5
+
 function Timeline({ tickets }: { tickets: Ticket[] }) {
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['key']>('all')
+  const [expanded, setExpanded] = useState(false)
   const active = FILTERS.find((f) => f.key === filter) ?? FILTERS[0]
   const rows = tickets.filter(active.match)
+  const hidden = rows.length - TIMELINE_PREVIEW
+  const shown = expanded ? rows : rows.slice(0, TIMELINE_PREVIEW)
 
   return (
     <Section title="ประวัติใบแจ้งซ่อม" description="ใหม่ → เก่า · เวลาซ่อม = แจ้งซ่อมจนหัวหน้าช่างปิดงาน">
@@ -250,7 +275,10 @@ function Timeline({ tickets }: { tickets: Ticket[] }) {
               key={f.key}
               type="button"
               aria-pressed={filter === f.key}
-              onClick={() => setFilter(f.key)}
+              onClick={() => {
+                setFilter(f.key)
+                setExpanded(false)
+              }}
               className={cn(
                 'rounded-full border px-3 py-1 text-sm transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring',
                 filter === f.key &&
@@ -269,7 +297,7 @@ function Timeline({ tickets }: { tickets: Ticket[] }) {
         </p>
       ) : (
         <ol className="relative ml-3 border-l-2 border-border">
-          {rows.map((t) => (
+          {shown.map((t) => (
             <li key={t.ext_id} className="relative pb-5 pl-6 last:pb-0">
               <span
                 aria-hidden
@@ -322,6 +350,30 @@ function Timeline({ tickets }: { tickets: Ticket[] }) {
           ))}
         </ol>
       )}
+
+      {hidden > 0 && (
+        <div className="flex justify-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? (
+              <>
+                <ChevronUp aria-hidden />
+                ย่อเหลือ {TIMELINE_PREVIEW} รายการล่าสุด
+              </>
+            ) : (
+              <>
+                <ChevronDown aria-hidden />
+                แสดงอีก {num(hidden, 0)} รายการ
+              </>
+            )}
+          </Button>
+        </div>
+      )}
     </Section>
   )
 }
@@ -373,45 +425,124 @@ function DocJobs({ jobs }: { jobs: Schemas['CarHistoryDocJob'][] }) {
 }
 
 /** ค่าซ่อมรายเดือนแยกตามระบบ (จากใบเบิกค่าซ่อมใน webstock) ใหม่ -> เก่า */
+/** ระบบที่แสดงแยกสี ที่เหลือรวมเป็น "อื่นๆ" (สีมากกว่านี้แยกกันไม่ออก) */
+const TOP_SYSTEMS = 7
+const OTHER_SYSTEMS = 'อื่นๆ'
+
 function RepairCosts({ items }: { items: Schemas['CarHistoryRepairItem'][] }) {
-  const months: { label: string; total: number; rows: typeof items }[] = []
-  for (const item of items) {
-    const last = months.at(-1)
-    if (last && last.label === item.label) {
-      last.rows.push(item)
-      last.total += item.amount
-    } else {
-      months.push({ label: item.label, total: item.amount, rows: [item] })
-    }
+  // รวมทั้งช่วง: ระบบที่ค่าซ่อมสูงสุดก่อน
+  const totals = new Map<string, number>()
+  for (const i of items) totals.set(i.repair_name, (totals.get(i.repair_name) ?? 0) + i.amount)
+  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1])
+  const shown = ranked.length > TOP_SYSTEMS + 1 ? ranked.slice(0, TOP_SYSTEMS) : ranked
+  const shownNames = new Set(shown.map(([name]) => name))
+  const rest = ranked.filter(([name]) => !shownNames.has(name))
+  const systems = [...shown.map(([name]) => name), ...(rest.length ? [OTHER_SYSTEMS] : [])]
+  const systemTotals = [
+    ...shown.map(([, v]) => v),
+    ...(rest.length ? [rest.reduce((sum, [, v]) => sum + v, 0)] : []),
+  ]
+
+  // เดือนเก่า -> ใหม่ ต่อเนื่อง (เดือนที่ไม่มีค่าซ่อมแสดงเป็น 0 ไม่ให้กราฟข้ามเดือน)
+  const keys = items.map((i) => i.year * 12 + i.month - 1)
+  const months: { key: number; label: string }[] = []
+  for (let k = Math.min(...keys); k <= Math.max(...keys); k++) {
+    const year = Math.floor(k / 12)
+    const month = (k % 12) + 1
+    months.push({
+      key: year * 100 + month,
+      label: `${MONTHS_SHORT[month - 1]} ${String((year + 543) % 100).padStart(2, '0')}`,
+    })
   }
+  const amount = (key: number, system: string) =>
+    items
+      .filter(
+        (i) =>
+          i.year * 100 + i.month === key &&
+          (system === OTHER_SYSTEMS ? !shownNames.has(i.repair_name) : i.repair_name === system),
+      )
+      .reduce((sum, i) => sum + i.amount, 0)
+  const monthSeries = systems.map((name) => ({
+    name,
+    data: months.map((m) => amount(m.key, name)),
+  }))
+  const labels = months.map((m) => m.label)
+  const colors = systems.map((name, i) =>
+    name === OTHER_SYSTEMS ? PALETTE[6] : CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+  )
+  const grand = systemTotals.reduce((a, b) => a + b, 0)
 
   return (
     <Section
       title="ค่าซ่อมแยกตามระบบ"
-      description="ยอดรายเดือนจากค่าซ่อมใน webstock (ไม่ได้ผูกกับใบแจ้งซ่อมรายใบ) · ใหม่ → เก่า"
+      description="ยอดรายเดือนจากค่าซ่อมใน webstock (ไม่ได้ผูกกับใบแจ้งซ่อมรายใบ)"
     >
-      {months.length === 0 ? (
+      {items.length === 0 ? (
         <p className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground">
           ยังไม่มีค่าซ่อม
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {months.map((m) => (
-            <div key={m.label} className="rounded-xl border bg-card p-4">
-              <div className="flex items-baseline justify-between gap-2 border-b pb-2">
-                <span className="font-semibold">{m.label}</span>
-                <span className="font-semibold tabular-nums">{num(m.total, 0)} บาท</span>
-              </div>
-              <ul className="mt-2 grid gap-1 text-sm">
-                {m.rows.map((r) => (
-                  <li key={r.repair_name} className="flex justify-between gap-2">
-                    <span className="text-muted-foreground">{r.repair_name}</span>
-                    <span className="tabular-nums">{num(r.amount, 0)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <ChartCard
+            title="ค่าซ่อมรายเดือน แยกตามระบบ"
+            unit="บาท"
+            rows={seriesRows(labels, monthSeries)}
+          >
+            <Chart
+              type="bar"
+              height={320}
+              series={monthSeries}
+              options={baseOptions({
+                colors,
+                chart: { stacked: true },
+                plotOptions: { bar: { borderRadius: 2, columnWidth: '60%' } },
+                xaxis: { categories: labels },
+                yaxis: { labels: { formatter: kilo } },
+                dataLabels: { enabled: false },
+                legend: { position: 'top', horizontalAlign: 'left' },
+                tooltip: {
+                  shared: true,
+                  intersect: false,
+                  y: { formatter: (v) => baht(Number(v ?? 0)) },
+                },
+              })}
+            />
+          </ChartCard>
+          <ChartCard
+            title="รวมทั้งช่วง แยกตามระบบ"
+            unit="บาท"
+            description={`รวม ${num(grand, 0)} บาท`}
+            rows={pieRows(systems, systemTotals)}
+          >
+            <Chart
+              type="bar"
+              height={320}
+              series={[{ name: 'ค่าซ่อม', data: systemTotals }]}
+              options={baseOptions({
+                colors,
+                plotOptions: {
+                  bar: {
+                    horizontal: true,
+                    distributed: true,
+                    borderRadius: 3,
+                    barHeight: '65%',
+                  },
+                },
+                xaxis: {
+                  categories: systems,
+                  labels: { formatter: (v) => kilo(Number(v)) },
+                },
+                dataLabels: {
+                  enabled: true,
+                  formatter: (v) => (grand ? `${((Number(v) / grand) * 100).toFixed(0)}%` : ''),
+                  style: { fontSize: '11px', colors: [TEXT] },
+                  offsetX: 4,
+                },
+                legend: { show: false },
+                tooltip: { y: { formatter: (v) => baht(Number(v ?? 0)) } },
+              })}
+            />
+          </ChartCard>
         </div>
       )}
     </Section>

@@ -1,7 +1,8 @@
-import { ArrowDown, ArrowUp, ArrowUpDown, Search, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, FileSpreadsheet, Search, X } from 'lucide-react'
 import { useState } from 'react'
 
 import type { CarRow, Schemas } from '@/api/client'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Select,
@@ -19,10 +20,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { downloadExcel } from '@/lib/export-excel'
 import { num } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-import { useFuel, useNoun, type Fuel } from './export-context'
+import { useExportFilters, useFuel, useNoun, type Fuel } from './export-context'
 
 type Metrics = CarRow | Schemas['CarTotals']
 
@@ -31,30 +33,6 @@ const normalize = (s: string) => s.toLowerCase().replace(/[\s-]/g, '')
 
 const ALL_BRANDS = '__all__'
 const ALL_TYPES = 'all'
-const NO_BRAND = '__none__'
-/** กรอกต่างกันแค่ช่องว่าง/ขีด/วงเล็บ/ตัวพิมพ์ ถือเป็นยี่ห้อเดียวกัน (เหมือนตารางเทียบรุ่นฝั่ง server) */
-const brandKey = (brand: string | null | undefined) =>
-  (brand ?? '').toUpperCase().replace(/[^\p{L}\p{N}]+/gu, '') || NO_BRAND
-
-/** ยี่ห้อที่มีในตาราง เรียงตามจำนวนคัน (ชื่อที่แสดงใช้แบบที่เจอก่อน) */
-function brandOptions(rows: CarRow[]) {
-  const map = new Map<string, { label: string; count: number }>()
-  for (const r of rows) {
-    const key = brandKey(r.brand)
-    const item = map.get(key) ?? { label: r.brand?.trim() || 'ไม่ระบุยี่ห้อ', count: 0 }
-    item.count += 1
-    map.set(key, item)
-  }
-  return [...map.entries()]
-    .map(([key, v]) => ({ key, ...v }))
-    .sort((a, b) =>
-      a.key === NO_BRAND
-        ? 1
-        : b.key === NO_BRAND
-          ? -1
-          : b.count - a.count || a.label.localeCompare(b.label, 'th'),
-    )
-}
 
 type SortValue = number | string | null | undefined
 
@@ -62,7 +40,8 @@ type Column = {
   label: string
   unit?: string
   value: (r: Metrics) => string
-  sortBy: (r: CarRow) => SortValue
+  /** ตัวเลขดิบ: ใช้เรียงและส่งออก Excel */
+  raw: (r: Metrics) => number | null | undefined
 }
 
 /** คอลัมน์ตัวเลข: รถบรรทุกเทียบน้ำมันเป็น ลิตร/กม. และมีคอลัมน์ระยะทาง */
@@ -70,25 +49,25 @@ const columnsFor = (fuel: Fuel): Column[] => [
   {
     label: '%MA',
     value: (r) => `${num(r.percent_ma, 2)}%`,
-    sortBy: (r) => r.percent_ma,
+    raw: (r) => r.percent_ma,
   },
   {
     label: 'ทำงานเฉลี่ยต่อวัน',
     unit: 'ชม.',
     value: (r) => num(r.avg_work_per_day, 2),
-    sortBy: (r) => r.avg_work_per_day,
+    raw: (r) => r.avg_work_per_day,
   },
   {
     label: 'การทำงานรวม',
     unit: 'ชม.',
     value: (r) => num(r.work_total, 2),
-    sortBy: (r) => r.work_total,
+    raw: (r) => r.work_total,
   },
   {
     label: 'น้ำมันดีเซล',
     unit: 'ลิตร',
     value: (r) => num(r.oil_total, 2),
-    sortBy: (r) => r.oil_total,
+    raw: (r) => r.oil_total,
   },
   ...(fuel.field === 'liter_per_km'
     ? [
@@ -96,7 +75,7 @@ const columnsFor = (fuel: Fuel): Column[] => [
           label: 'ระยะทาง',
           unit: 'กม.',
           value: (r: Metrics) => num(r.km_total, 0),
-          sortBy: (r: CarRow) => r.km_total,
+          raw: (r: Metrics) => r.km_total,
         },
       ]
     : []),
@@ -104,36 +83,36 @@ const columnsFor = (fuel: Fuel): Column[] => [
     label: 'อัตราเชื้อเพลิง',
     unit: fuel.unit,
     value: (r) => num(r[fuel.field], 2),
-    sortBy: (r) => r[fuel.field],
+    raw: (r) => r[fuel.field],
   },
   {
     label: 'ค่าซ่อม',
     unit: 'บาท',
     value: (r) => num(r.repair_total, 2),
-    sortBy: (r) => r.repair_total,
+    raw: (r) => r.repair_total,
   },
   {
     label: 'ต้นทุนซ่อม',
     unit: 'บาท/ชม.',
     value: (r) => num(r.repair_cost_per_hr, 2),
-    sortBy: (r) => r.repair_cost_per_hr,
+    raw: (r) => r.repair_cost_per_hr,
   },
   {
     label: 'ครั้งที่เสีย',
     value: (r) => String(r.failure_count),
-    sortBy: (r) => r.failure_count,
+    raw: (r) => r.failure_count,
   },
   {
     label: 'MTBF',
     unit: 'ชม.',
     value: (r) => num(r.mtbf, 1),
-    sortBy: (r) => r.mtbf,
+    raw: (r) => r.mtbf,
   },
   {
     label: 'MTTR',
     unit: 'ชม.',
     value: (r) => num(r.mttr, 1),
-    sortBy: (r) => r.mttr,
+    raw: (r) => r.mttr,
   },
 ]
 
@@ -233,6 +212,9 @@ export function CarTable({
   carTypes,
   carType,
   onSelectCarType,
+  brands,
+  brand,
+  onSelectBrand,
 }: {
   table: Schemas['CarTable']
   selected: CarRow | null
@@ -241,17 +223,19 @@ export function CarTable({
   carTypes: { id: number; name: string }[]
   carType: number | null
   onSelectCarType: (id: number | null) => void
+  /** ยี่ห้อ: กรองทั้งหน้า (ฝั่ง server) เหมือนประเภทรถ */
+  brands: Schemas['BrandOption'][]
+  brand: string | null
+  onSelectBrand: (key: string | null) => void
 }) {
   const noun = useNoun()
   const COLUMNS = columnsFor(useFuel())
-  const SORTERS: Record<string, (r: CarRow) => SortValue> = Object.fromEntries(
-    [...TEXT_COLUMNS, ...COLUMNS].map((c) => [c.label, c.sortBy]),
-  )
+  const SORTERS: Record<string, (r: CarRow) => SortValue> = Object.fromEntries([
+    ...TEXT_COLUMNS.map((c) => [c.label, c.sortBy]),
+    ...COLUMNS.map((c) => [c.label, c.raw]),
+  ])
   const [query, setQuery] = useState('')
-  const [brand, setBrand] = useState(ALL_BRANDS)
-  const brands = brandOptions(table.rows)
-  // แผนก/ตัวกรองเปลี่ยนแล้วยี่ห้อที่เลือกไว้ไม่มีในตาราง -> กลับไปทุกยี่ห้อ
-  const activeBrand = brands.some((b) => b.key === brand) ? brand : ALL_BRANDS
+  const brandTotal = brands.reduce((sum, b) => sum + b.count, 0)
   const [sort, setSort] = useState<Sort>(null)
   const onSort = (key: string) =>
     setSort((s) =>
@@ -269,7 +253,6 @@ export function CarTable({
   // เก็บลำดับเดิมไว้ ค้นหาแล้วยังเห็นว่าคันนี้อยู่ลำดับที่เท่าไรในตารางเต็ม
   const rows = table.rows
     .map((row, index) => ({ row, rank: index + 1 }))
-    .filter(({ row }) => activeBrand === ALL_BRANDS || brandKey(row.brand) === activeBrand)
     .filter(
       ({ row }) =>
         !q ||
@@ -282,7 +265,35 @@ export function CarTable({
   if (sort && by) {
     rows.sort((a, b) => compare(by(a.row), by(b.row), sort.dir) || a.rank - b.rank)
   }
-  const filtering = q !== '' || activeBrand !== ALL_BRANDS
+  const filtering = q !== ''
+
+  const filters = useExportFilters()
+  const title = `รายการ${noun}`
+  const round2 = (v: number | null | undefined) => (v == null ? null : Math.round(v * 100) / 100)
+  // แถวตามที่เห็น (ค้นหา/เรียงแล้ว) + แถวรวมจาก server
+  const exportExcel = () =>
+    downloadExcel({
+      title,
+      filters: q ? [...filters, ['ค้นหา', query]] : filters,
+      rows: [
+        [
+          'ลำดับ',
+          ...TEXT_COLUMNS.map((c) => c.label),
+          ...COLUMNS.map((c) => (c.unit ? `${c.label} (${c.unit})` : c.label)),
+        ],
+        ...rows.map(({ row, rank }) => [
+          rank,
+          // ค่าดิบ (ปี/อายุเป็นตัวเลข ไม่มีขีด –)
+          ...TEXT_COLUMNS.map((c) => c.sortBy(row) ?? null),
+          ...COLUMNS.map((c) => round2(c.raw(row))),
+        ]),
+        [
+          `${filtering ? 'รวมทั้งหมด' : 'รวม'} ${table.rows.length} คัน`,
+          ...TEXT_COLUMNS.map(() => ''),
+          ...COLUMNS.map((c) => round2(c.raw(table.totals))),
+        ],
+      ],
+    })
 
   return (
     <div className="grid gap-3">
@@ -328,13 +339,16 @@ export function CarTable({
             ))}
           </SelectContent>
         </Select>
-        {brands.length > 1 && (
-          <Select value={activeBrand} onValueChange={setBrand}>
+        {(brands.length > 1 || brand !== null) && (
+          <Select
+            value={brand ?? ALL_BRANDS}
+            onValueChange={(v) => onSelectBrand(v === ALL_BRANDS ? null : v)}
+          >
             <SelectTrigger className="w-full bg-card sm:w-56" aria-label="กรองตามยี่ห้อ">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_BRANDS}>ทุกยี่ห้อ ({table.rows.length})</SelectItem>
+              <SelectItem value={ALL_BRANDS}>ทุกยี่ห้อ ({brandTotal})</SelectItem>
               {brands.map((b) => (
                 <SelectItem key={b.key} value={b.key}>
                   {b.label} ({b.count})
@@ -348,10 +362,22 @@ export function CarTable({
             พบ {rows.length} จาก {table.rows.length} คัน
           </span>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={exportExcel}
+          disabled={table.rows.length === 0}
+          className="ml-auto text-muted-foreground"
+          aria-label={`ดาวน์โหลด Excel: ${title}`}
+        >
+          <FileSpreadsheet />
+          Excel
+        </Button>
       </div>
 
-      {/* ให้กล่องนี้เป็นตัวเลื่อนทั้งสองแกน เพื่อให้หัวตารางและแถวรวมติดขอบได้ */}
-      <div className="scroll-thin max-h-[520px] overflow-auto rounded-xl border bg-card [&>[data-slot=table-container]]:overflow-visible">
+      {/* ให้กล่องนี้เป็นตัวเลื่อนทั้งสองแกน เพื่อให้หัวตารางและแถวรวมติดขอบได้
+          สูงพอสำหรับหัวตาราง + 7 แถว + แถวรวม (40 + 7×37 + 37 + แถบเลื่อนแนวนอน) ที่เหลือเลื่อนดูในกรอบ */}
+      <div className="scroll-thin max-h-[350px] overflow-auto rounded-xl border bg-card [&>[data-slot=table-container]]:overflow-visible">
         <Table className="text-sm">
           <TableHeader className="sticky top-0 z-10 bg-card shadow-[inset_0_-1px_0_var(--color-border)]">
             <TableRow className="hover:bg-transparent">

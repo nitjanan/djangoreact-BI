@@ -30,7 +30,7 @@ function toInt(value: string | null) {
 
 /**
  * ตัวกรองของ dashboard เก็บใน URL
- * (?company=&year=&month_from=&month_to=&car_dep=&car_type=&car_id=&branch_company_id=)
+ * (?company=&year=&month_from=&month_to=&car_dep=&car_type=&brand=&car_id=&branch_company_id=)
  * แทน session ของหน้าเดิม — refresh/แชร์ลิงก์แล้วได้หน้าเดิม
  */
 export function useDashboardParams(me: Me) {
@@ -50,6 +50,7 @@ export function useDashboardParams(me: Me) {
   const monthTo = toInt(params.get("month_to"));
   const carDep = toInt(params.get("car_dep")) ?? 1;
   const carType = toInt(params.get("car_type"));
+  const brand = params.get("brand") || undefined;
   const carId = toInt(params.get("car_id"));
   const branchCompanyId = params.get("branch_company_id") || undefined;
 
@@ -63,6 +64,7 @@ export function useDashboardParams(me: Me) {
             month_to: monthTo ?? null,
             car_dep: carDep,
             car_type: carType ?? null,
+            brand: brand ?? null,
             car_id: carId ?? null,
             branch_company_id: branchCompanyId ?? null,
           }
@@ -74,6 +76,7 @@ export function useDashboardParams(me: Me) {
       monthTo,
       carDep,
       carType,
+      brand,
       carId,
       branchCompanyId,
     ],
@@ -107,6 +110,7 @@ export function useDashboardParams(me: Me) {
     monthTo: monthTo ?? null,
     carDep,
     carType: carType ?? null,
+    brand: brand ?? null,
     selectCompany: (code: string) => {
       saveLastCompany(code);
       // เปลี่ยนบริษัทแล้วล้างรถที่เลือกไว้ (เหมือนหน้าเดิม)
@@ -116,11 +120,13 @@ export function useDashboardParams(me: Me) {
     selectPeriod: (y: number, from: number | null, to: number | null) =>
       update({ year: y, month_from: from, month_to: to }),
     selectCarDep: (id: number) =>
-      update({ car_dep: id, car_type: null, ...clearCar }),
+      update({ car_dep: id, car_type: null, brand: null, ...clearCar }),
     selectCarType: (id: number | null) => update({ car_type: id, ...clearCar }),
+    /** ยี่ห้อ (BrandOption.key) กรองทั้งหน้าเหมือนประเภทรถ */
+    selectBrand: (key: string | null) => update({ brand: key, ...clearCar }),
     selectCar: (carId: number, branchCompanyId: string) =>
       update({ car_id: carId, branch_company_id: branchCompanyId }),
     clearCar: () => update(clearCar),
-    resetFilters: () => update({ car_type: null, ...clearCar }),
+    resetFilters: () => update({ car_type: null, brand: null, ...clearCar }),
   };
 }

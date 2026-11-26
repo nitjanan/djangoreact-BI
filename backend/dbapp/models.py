@@ -327,6 +327,9 @@ class SummaryWork(models.Model):
     month_th = models.CharField(max_length=20, blank=False, null=True)
     sum_diff_mile = models.DecimalField(max_digits=15, decimal_places=2, default=0)
     count_diff_time = models.IntegerField()
+    # ชั่วโมงหน้าปัดคิดทีละรายการ (webstock ปรับเลขที่กรอกไม่มีจุดทศนิยม และไม่นับรายการที่กรอกผิด)
+    # null = webstock ยังไม่ส่งมา ใช้ sum_diff_mile แทน
+    meter_hours = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     percent = models.DecimalField(max_digits=15, decimal_places=2, default=0)
 
     branch_company = models.ForeignKey(

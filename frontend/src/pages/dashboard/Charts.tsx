@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from 'react'
 import Chart from 'react-apexcharts'
 
 import type { CarRow, Schemas } from '@/api/client'
@@ -11,7 +12,6 @@ import {
   CATEGORY_COLORS,
   COLOR,
   PALETTE,
-  GRID,
   TEXT,
   TEXT_MUTED,
   baht,
@@ -31,29 +31,79 @@ const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '
 /** tooltip แบบ custom ของ ApexCharts เป็น HTML string: ชื่อรถ/ยี่ห้อ/รุ่นกรอกจาก webstock ต้อง escape ก่อน */
 const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
 
-/* ---------- ค่าซ่อมรายเดือน + เส้นค่าเฉลี่ย ---------- */
+/* ---------- ค่าซ่อมรายเดือน + เส้นค่าเฉลี่ย + คาดการณ์เดือนนี้/เดือนหน้า ---------- */
 
-export function RepairByMonthChart({ chart }: { chart: Charts['repair_by_month'] }) {
+export function RepairByMonthChart({
+  chart,
+  forecast,
+}: {
+  chart: Charts['repair_by_month']
+  forecast?: Schemas['Forecast'] | null
+}) {
   const CHART_HELP = useChartHelp()
   const name = 'ค่าใช้จ่ายซ่อมบำรุง'
   const avg = chart.series.length ? chart.series.reduce((a, b) => a + b, 0) / chart.series.length : 0
+
+  // คาดการณ์: เดือนนี้ = ยอดที่บันทึกแล้ว + ส่วนที่คาดว่าจะเข้ามาอีก (แท่งลายทาง) · เดือนหน้า = คาดการณ์ทั้งแท่ง
+  const labels = [...chart.labels]
+  const recorded: (number | null)[] = [...chart.series]
+  const expected: (number | null)[] = chart.series.map(() => null)
+  if (forecast) {
+    const current = labels.indexOf(forecast.current_label)
+    if (current >= 0) {
+      expected[current] = Math.max(forecast.repair.expected - (recorded[current] ?? 0), 0)
+    }
+    if (!labels.includes(forecast.next_label)) {
+      labels.push(forecast.next_label)
+      recorded.push(null)
+      expected.push(forecast.repair.expected)
+    }
+  }
+  const series = forecast
+    ? [
+        { name: 'บันทึกแล้ว', data: recorded },
+        { name: 'คาดการณ์', data: expected },
+      ]
+    : [{ name, data: chart.series }]
+  const description = forecast
+    ? `แท่งลายทาง = คาดการณ์ (ค่าเฉลี่ย ${forecast.base_months} เดือนล่าสุดที่จบแล้ว) · ${forecast.current_label}และ${forecast.next_label} น่าจะอยู่ราว ${num(forecast.repair.expected, 0)} บาท/เดือน (ช่วง ${num(forecast.repair.low, 0)}–${num(forecast.repair.high, 0)}) · ${forecast.current_label}เพิ่งบันทึก ${num(forecast.repair.month_to_date, 0)} บาท เพราะเอกสารส่วนใหญ่เข้าปลายเดือน`
+    : undefined
+
   return (
     <ChartCard
       title="ค่าใช้จ่ายซ่อมบำรุงรายเดือน"
       help={CHART_HELP.repairByMonth}
       unit="บาท"
+      description={description}
       empty={chart.series.length === 0}
-      rows={seriesRows(chart.labels, [{ name, data: chart.series }])}
+      rows={seriesRows(labels, series)}
     >
       <Chart
         type="bar"
         height={280}
-        series={[{ name, data: chart.series }]}
+        series={series}
         options={baseOptions({
-          colors: [COLOR.repair],
-          xaxis: { categories: chart.labels },
-          plotOptions: { bar: { borderRadius: 6, columnWidth: '55%', dataLabels: { position: 'top' } } },
-          dataLabels: { enabled: true, formatter: (v) => kilo(Number(v)), offsetY: -20, style: { fontSize: '11px', colors: [TEXT] } },
+          chart: { stacked: Boolean(forecast) },
+          colors: [COLOR.repair, COLOR.repair],
+          fill: forecast
+            ? { type: ['solid', 'pattern'], pattern: { style: 'slantedLines', width: 6, height: 6, strokeWidth: 2 } }
+            : undefined,
+          legend: { show: false },
+          xaxis: { categories: labels },
+          plotOptions: {
+            bar: {
+              borderRadius: 6,
+              borderRadiusApplication: 'end',
+              borderRadiusWhenStacked: 'last',
+              columnWidth: '55%',
+              dataLabels: forecast
+                ? { total: { enabled: true, formatter: (v) => kilo(Number(v)), offsetY: -4, style: { fontSize: '11px', fontWeight: 400, color: TEXT } } }
+                : { position: 'top' },
+            },
+          },
+          dataLabels: forecast
+            ? { enabled: false }
+            : { enabled: true, formatter: (v) => kilo(Number(v)), offsetY: -20, style: { fontSize: '11px', colors: [TEXT] } },
           yaxis: { labels: { formatter: kilo } },
           tooltip: { y: { formatter: baht } },
           annotations: {
@@ -136,16 +186,19 @@ function RankedBarCard({
   title,
   help,
   chart,
+  actions,
 }: {
   title: string
   help: ChartHelp
   chart: Schemas['SeriesTotalChart']
+  actions?: ReactNode
 }) {
   const name = 'ค่าใช้จ่ายซ่อมบำรุง'
   return (
     <ChartCard
       title={title}
       help={help}
+      actions={actions}
       unit="บาท"
       empty={chart.series.length === 0}
       rows={pieRows(chart.labels, chart.series)}
@@ -191,19 +244,50 @@ function RankedBarCard({
   )
 }
 
-export function RepairByTypeChart({ chart }: { chart: Charts['repair_by_type'] }) {
-  const CHART_HELP = useChartHelp()
-  return <RankedBarCard title="ค่าซ่อมตามประเภทการซ่อม" help={CHART_HELP.repairByType} chart={chart} />
-}
-
-export function RepairByCarTypeChart({ chart }: { chart: Charts['repair_by_car_type'] }) {
+/** ค่าซ่อมแยกประเภท: สลับได้ระหว่างประเภทการซ่อม กับประเภทรถ (กราฟเดียว) */
+export function RepairBreakdownChart({
+  byType,
+  byCarType,
+}: {
+  byType: Charts['repair_by_type']
+  byCarType: Charts['repair_by_car_type']
+}) {
   const CHART_HELP = useChartHelp()
   const noun = useNoun()
-  return <RankedBarCard
-      title={`ค่าใช้จ่ายแบ่งตามประเภท${noun}`}
+  const [view, setView] = useState<'type' | 'carType'>('type')
+  const views = [
+    { key: 'type', label: 'ประเภทการซ่อม' },
+    { key: 'carType', label: `ประเภท${noun}` },
+  ] as const
+  const toggle = (
+    <div className="inline-flex rounded-lg border bg-muted p-0.5 text-sm" role="group" aria-label="แยกค่าซ่อมตาม">
+      {views.map((v) => (
+        <button
+          key={v.key}
+          type="button"
+          aria-pressed={view === v.key}
+          onClick={() => setView(v.key)}
+          className={
+            view === v.key
+              ? 'rounded-md bg-card px-2.5 py-1 font-medium shadow-sm'
+              : 'rounded-md px-2.5 py-1 text-muted-foreground hover:text-foreground'
+          }
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
+  )
+  return view === 'type' ? (
+    <RankedBarCard title="ค่าซ่อมแยกตามประเภทการซ่อม" help={CHART_HELP.repairByType} chart={byType} actions={toggle} />
+  ) : (
+    <RankedBarCard
+      title={`ค่าซ่อมแยกตามประเภท${noun}`}
       help={CHART_HELP.repairByCarType}
-      chart={chart}
+      chart={byCarType}
+      actions={toggle}
     />
+  )
 }
 
 /* ---------- Pareto ค่าซ่อมตามรถ ---------- */
@@ -320,14 +404,16 @@ function outlierLimit(values: number[]) {
 
 /* ---------- กราฟจุด: ชั่วโมงทำงาน vs ต้นทุนซ่อม/ชม. ---------- */
 
-export function CarScatterChart({
+function HoursCostScatter({
   rows,
   selected,
   onSelect,
+  actions,
 }: {
   rows: CarRow[]
   selected: CarRow | null
   onSelect: (row: CarRow) => void
+  actions?: ReactNode
 }) {
   const CHART_HELP = useChartHelp()
   const noun = useNoun()
@@ -359,6 +445,7 @@ export function CarScatterChart({
       help={CHART_HELP.scatter}
       unit="ชั่วโมง, บาท/ชั่วโมง"
       description={hidden ? `ไม่แสดง ${hidden} คันที่ค่าสูงผิดปกติ ดูได้ในตาราง` : undefined}
+      actions={actions}
       empty={cars.length === 0}
       rows={exportRows}
     >
@@ -415,12 +502,14 @@ export function CarScatterChart({
 const CAR_TYPE_COLORS = [PALETTE[2], PALETTE[3], PALETTE[4], PALETTE[7]]
 const OTHER_TYPES = 'ชนิดอื่น'
 
-export function AgeCostChart({
+function AgeCostScatter({
   rows,
   onSelect,
+  actions,
 }: {
   rows: CarRow[]
   onSelect: (row: CarRow) => void
+  actions?: ReactNode
 }) {
   const CHART_HELP = useChartHelp()
   const noun = useNoun()
@@ -475,6 +564,7 @@ export function AgeCostChart({
       help={CHART_HELP.ageCost}
       unit="ปี, บาท/ชั่วโมง"
       description={notes.length ? notes.join(' · ') : undefined}
+      actions={actions}
       empty={cars.length === 0}
       rows={exportRows}
     >
@@ -527,68 +617,57 @@ export function AgeCostChart({
   )
 }
 
-/* ---------- ตารางสี รถ x เดือน ---------- */
+/* ---------- กราฟจุดต้นทุนซ่อม/ชม. รายคัน: สลับแกนนอนเป็นชั่วโมงทำงานหรืออายุ ---------- */
 
-export function RepairHeatmapChart({ chart }: { chart: Charts['repair_heatmap'] }) {
-  const CHART_HELP = useChartHelp()
-  const noun = useNoun()
-  const max = Math.max(0, ...chart.rows.flatMap((r) => r.data))
-  // ApexCharts วาดแถวจากล่างขึ้นบน -> กลับลำดับให้คันที่ค่าซ่อมสูงสุดอยู่บนสุด
-  const series = [...chart.rows].reverse().map((r) => ({
-    name: carLabel(r.name, r.company),
-    data: chart.labels.map((m, i) => ({ x: m, y: round2(r.data[i]) })),
-  }))
-  const steps = [0.25, 0.5, 0.75, 1]
-  const shades = ['#cdeeed', '#8fd3d1', '#3fa9ab', '#0b6f74']
-
-  return (
-    <ChartCard
-      title={`ค่าซ่อมรายเดือนของ${noun}แต่ละคัน`}
-      help={CHART_HELP.heatmap}
-      unit="บาท"
-      description={`${noun} ${chart.rows.length} คันที่ค่าซ่อมสูงสุด`}
-      empty={chart.rows.length === 0 || max === 0}
-      rows={seriesRows(
-        chart.labels,
-        chart.rows.map((r) => ({ name: carLabel(r.name, r.company), data: r.data })),
-      )}
-    >
-      <Chart
-        type="heatmap"
-        height={Math.max(220, chart.rows.length * 30 + 70)}
-        series={series}
-        options={baseOptions({
-          dataLabels: { enabled: false },
-          stroke: { width: 2, colors: ['#fff'] },
-          legend: { show: true, position: 'bottom' },
-          plotOptions: {
-            heatmap: {
-              radius: 3,
-              enableShades: false,
-              colorScale: {
-                ranges: [
-                  { from: 0, to: 0, color: GRID, name: 'ไม่มีค่าซ่อม' },
-                  ...steps.map((s, i) => ({
-                    from: i === 0 ? 0.01 : max * steps[i - 1],
-                    to: max * s,
-                    color: shades[i],
-                    name: `ถึง ${kilo(max * s)}`,
-                  })),
-                ],
-              },
-            },
-          },
-          yaxis: { labels: { maxWidth: 230 } },
-          tooltip: { y: { formatter: baht } },
-        })}
-      />
-    </ChartCard>
+export function CarCostScatterChart({
+  rows,
+  selected,
+  onSelect,
+}: {
+  rows: CarRow[]
+  selected: CarRow | null
+  onSelect: (row: CarRow) => void
+}) {
+  const [axis, setAxis] = useState<'hours' | 'age'>('hours')
+  const views = [
+    { key: 'hours', label: 'ชั่วโมงทำงาน' },
+    { key: 'age', label: 'อายุ' },
+  ] as const
+  const toggle = (
+    <div className="inline-flex rounded-lg border bg-muted p-0.5 text-sm" role="group" aria-label="แกนนอนของกราฟ">
+      {views.map((v) => (
+        <button
+          key={v.key}
+          type="button"
+          aria-pressed={axis === v.key}
+          onClick={() => setAxis(v.key)}
+          className={
+            axis === v.key
+              ? 'rounded-md bg-card px-2.5 py-1 font-medium shadow-sm'
+              : 'rounded-md px-2.5 py-1 text-muted-foreground hover:text-foreground'
+          }
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
+  )
+  return axis === 'hours' ? (
+    <HoursCostScatter rows={rows} selected={selected} onSelect={onSelect} actions={toggle} />
+  ) : (
+    <AgeCostScatter rows={rows} onSelect={onSelect} actions={toggle} />
   )
 }
 
 /* ---------- น้ำมัน / ชั่วโมงทำงาน (แท่ง + เส้น เพราะสองค่าเกี่ยวกันจริง) ---------- */
 
-export function OilByMonthChart({ chart }: { chart: Charts['oil_by_month'] }) {
+export function OilByMonthChart({
+  chart,
+  forecast,
+}: {
+  chart: Charts['oil_by_month']
+  forecast?: Schemas['Forecast'] | null
+}) {
   const CHART_HELP = useChartHelp()
   const series = [
     { name: 'ปริมาณที่ใช้น้ำมัน (ลิตร)', type: 'column', data: chart.liters },
@@ -599,6 +678,11 @@ export function OilByMonthChart({ chart }: { chart: Charts['oil_by_month'] }) {
       title="ปริมาณที่ใช้น้ำมันเชื้อเพลิงรวม"
       help={CHART_HELP.oil}
       unit="ลิตร, ลิตร/กม."
+      description={
+        forecast
+          ? `คาดการณ์${forecast.current_label}และ${forecast.next_label} ราว ${num(forecast.oil.expected, 0)} ลิตร/เดือน (ช่วง ${num(forecast.oil.low, 0)}–${num(forecast.oil.high, 0)})`
+          : undefined
+      }
       empty={chart.labels.length === 0}
       rows={seriesRows(chart.labels, series)}
     >

@@ -211,6 +211,7 @@ def sync_work(start_date, end_date):
                 car_id=item["car_id"],
                 sum_diff_mile=item["sum_diff_mile"],
                 count_diff_time=item["count_diff_time"],
+                meter_hours=item.get("meter_hours"),
                 percent=item["percent"],
             )
             for item in data

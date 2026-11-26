@@ -19,7 +19,14 @@ const TITLE = "งานที่ทำ แยกตามแผนกค่า�
  * งานจากบันทึกการใช้รถ: แผนกค่าใช้จ่ายไหนใช้รถกี่ชั่วโมง (กดเพื่อดูรายละเอียดงาน)
  * ชั่วโมง = เวลาเริ่ม-จบของแต่ละงาน, กม. = เลขไมล์ของงาน, ครั้ง = จำนวนงานที่บันทึก
  */
-export function JobsSummary({ data }: { data: Jobs }) {
+export function JobsSummary({
+  data,
+  singleCar = false,
+}: {
+  data: Jobs;
+  /** หน้าประวัติรถรายคัน: ไม่แสดงจำนวนคัน (เป็น 1 เสมอ) */
+  singleCar?: boolean;
+}) {
   const filters = useExportFilters();
   const noun = useNoun();
   const [open, setOpen] = useState<string | null>(null);
@@ -45,7 +52,7 @@ export function JobsSummary({ data }: { data: Jobs }) {
           "ชั่วโมงทำงาน",
           "ระยะทาง (กม.)",
           "จำนวนครั้ง",
-          `จำนวน${noun} (คัน)`,
+          ...(singleCar ? [] : [`จำนวน${noun} (คัน)`]),
         ],
         ...data.departments.flatMap((d) =>
           d.jobs.map((j) => [
@@ -54,7 +61,7 @@ export function JobsSummary({ data }: { data: Jobs }) {
             round2(j.hours),
             round2(j.km),
             j.trips,
-            j.cars,
+            ...(singleCar ? [] : [j.cars]),
           ]),
         ),
       ],
@@ -99,6 +106,7 @@ export function JobsSummary({ data }: { data: Jobs }) {
               open={open === d.name}
               onToggle={() => setOpen(open === d.name ? null : d.name)}
               noun={noun}
+              singleCar={singleCar}
             />
           ))}
         </ul>
@@ -114,6 +122,7 @@ function DepartmentRow({
   open,
   onToggle,
   noun,
+  singleCar,
 }: {
   dept: Department;
   share: number;
@@ -121,6 +130,7 @@ function DepartmentRow({
   open: boolean;
   onToggle: () => void;
   noun: string;
+  singleCar: boolean;
 }) {
   return (
     <li>
@@ -140,7 +150,8 @@ function DepartmentRow({
             {d.name}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
-            {num(d.trips, 0)} ครั้ง · {num(d.cars, 0)} คัน
+            {num(d.trips, 0)} ครั้ง
+            {!singleCar && ` · ${num(d.cars, 0)} คัน`}
             {d.km > 0 && ` · ${num(d.km, 0)} กม.`}
           </span>
         </span>
@@ -184,7 +195,9 @@ function DepartmentRow({
                 <th className="py-1.5 pr-3 text-right font-normal">ชั่วโมง</th>
                 <th className="py-1.5 pr-3 text-right font-normal">กม.</th>
                 <th className="py-1.5 pr-3 text-right font-normal">ครั้ง</th>
-                <th className="py-1.5 text-right font-normal">{noun} (คัน)</th>
+                {!singleCar && (
+                  <th className="py-1.5 text-right font-normal">{noun} (คัน)</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -200,9 +213,11 @@ function DepartmentRow({
                   <td className="py-1.5 pr-3 text-right tabular-nums">
                     {num(j.trips, 0)}
                   </td>
-                  <td className="py-1.5 text-right tabular-nums">
-                    {num(j.cars, 0)}
-                  </td>
+                  {!singleCar && (
+                    <td className="py-1.5 text-right tabular-nums">
+                      {num(j.cars, 0)}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

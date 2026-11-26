@@ -334,6 +334,13 @@ export interface components {
             /** Format: double */
             downtime_hours: number;
         };
+        BrandOption: {
+            /** @description ยี่ห้อที่ตัดช่องว่าง/ขีดออก ใช้เป็นค่าตัวกรอง brand */
+            key: string;
+            label: string;
+            /** @description จำนวนคันในตารางรถ */
+            count: number;
+        };
         Car: {
             readonly id: number;
             code: string | null;
@@ -364,6 +371,8 @@ export interface components {
             tickets: components["schemas"]["CarHistoryTicket"][];
             /** @description การซ่อมจากใบจ่ายอะไหล่ของรถที่ไม่มีใบแจ้งซ่อม ใหม่ -> เก่า */
             doc_jobs: components["schemas"]["CarHistoryDocJob"][];
+            /** @description งานที่ทำจากบันทึกการใช้รถ แยกตามแผนกค่าใช้จ่าย */
+            jobs: components["schemas"]["Jobs"];
         };
         CarHistoryCar: {
             car_id: number;
@@ -543,6 +552,12 @@ export interface components {
             /** ชื่อชนิดรถ/เครื่องจักร */
             name: string;
         };
+        /**
+         * @description * `repair_by_month` - repair_by_month
+         *     * `reliability` - reliability
+         * @enum {string}
+         */
+        ChartEnum: "repair_by_month" | "reliability";
         Charts: {
             repair_by_type: components["schemas"]["SeriesTotalChart"];
             repair_by_car_type: components["schemas"]["SeriesTotalChart"];
@@ -560,9 +575,11 @@ export interface components {
          *     * `repeat` - repeat
          *     * `failure` - failure
          *     * `fuel` - fuel
+         *     * `fuel_spike` - fuel_spike
+         *     * `low_use` - low_use
          * @enum {string}
          */
-        CodeEnum: "stale" | "cost" | "replace" | "repeat" | "failure" | "fuel";
+        CodeFbfEnum: "stale" | "cost" | "replace" | "repeat" | "failure" | "fuel" | "fuel_spike" | "low_use";
         Company: {
             /** รหัสสาขาบริษัท */
             id: string;
@@ -585,6 +602,7 @@ export interface components {
         Dashboard: {
             filters: components["schemas"]["DashboardFilters"];
             car_types: components["schemas"]["CarType"][];
+            brands: components["schemas"]["BrandOption"][];
             selected_car: components["schemas"]["CarRow"] | null;
             car_table: components["schemas"]["CarTable"];
             charts: components["schemas"]["Charts"];
@@ -594,6 +612,10 @@ export interface components {
             parts: components["schemas"]["Parts"];
             jobs: components["schemas"]["Jobs"];
             watchlist: components["schemas"]["Watchlist"];
+            downtime: components["schemas"]["Downtime"];
+            part_prices: components["schemas"]["PartPrices"];
+            /** @description null = ไม่ได้ดูปีปัจจุบันถึงเดือนปัจจุบัน หรือข้อมูลไม่ถึง 3 เดือน */
+            forecast: components["schemas"]["Forecast"] | null;
             model_comparison: components["schemas"]["ModelComparison"];
             /** @description ว่าง = ดูบริษัทเดียวหรือเลือกรถคันเดียว */
             branch_compare: components["schemas"]["BranchCompare"][];
@@ -625,11 +647,72 @@ export interface components {
             /** @description ชื่อแผนกที่เลือก ใช้แทนคำว่า รถ บนหน้าเว็บ */
             unit_noun: string;
             car_type: number | null;
+            /** @description key ของยี่ห้อที่เลือก (BrandOption.key) */
+            brand: string | null;
             car_id: number | null;
             branch_company_id: string | null;
         };
         Detail: {
             detail: string;
+        };
+        Downtime: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            car_count: number;
+            open_car_count: number;
+            /** Format: double */
+            hours: number;
+            /** @description จำนวนรถที่หยุดในแต่ละวัน เริ่มที่ start */
+            daily: number[];
+            peak: number;
+            /** Format: date */
+            peak_date: string | null;
+            cars: components["schemas"]["DowntimeCar"][];
+        };
+        DowntimeCar: {
+            car_id: number;
+            branch_company_id: string;
+            label: string;
+            company: string;
+            /** Format: double */
+            hours: number;
+            open: boolean;
+            spans: components["schemas"]["DowntimeSpan"][];
+        };
+        DowntimeSpan: {
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            open: boolean;
+            ref_no: string;
+            broke_reason: string;
+        };
+        Forecast: {
+            /** @description เดือนที่จบแล้ว */
+            labels: string[];
+            current_label: string;
+            next_label: string;
+            day: number;
+            days_in_month: number;
+            base_months: number;
+            range_months: number;
+            repair: components["schemas"]["ForecastSeries"];
+            oil: components["schemas"]["ForecastSeries"];
+        };
+        ForecastSeries: {
+            /** Format: double */
+            expected: number;
+            /** Format: double */
+            low: number;
+            /** Format: double */
+            high: number;
+            /** Format: double */
+            month_to_date: number;
+            /** @description ตรงกับ labels */
+            history: number[];
         };
         /**
          * @description * `fuel_rate` - fuel_rate
@@ -676,6 +759,13 @@ export interface components {
             cars: components["schemas"]["InsightCar"][];
             points: string[];
             hint: string;
+            /**
+             * @description กราฟที่เกี่ยวข้อง: กด hint แล้วเลื่อนไปที่กราฟนั้น
+             *
+             *     * `repair_by_month` - repair_by_month
+             *     * `reliability` - reliability
+             */
+            chart: (components["schemas"]["ChartEnum"] | components["schemas"]["NullEnum"]) | null;
         };
         InsightTarget: {
             car_id: number;
@@ -845,6 +935,8 @@ export interface components {
             immobile_car_count: number;
             stale_count: number;
             stale_days: number;
+            /** @description ใบที่ PO เลยกำหนดรับของแล้ว */
+            po_overdue_count: number;
             has_process: boolean;
             buckets: components["schemas"]["OpenJobBucket"][];
             stages: components["schemas"]["OpenJobStage"][];
@@ -873,6 +965,40 @@ export interface components {
             unit: string;
             /** Format: double */
             amount: number;
+        };
+        PartPrice: {
+            stkcod: string;
+            name: string;
+            unit: string;
+            /** Format: date */
+            first_date: string;
+            /** Format: double */
+            first_price: number;
+            /** Format: date */
+            last_date: string;
+            /** Format: double */
+            last_price: number;
+            /**
+             * Format: double
+             * @description %
+             */
+            change: number;
+            /** Format: double */
+            period_qty: number;
+            /** Format: double */
+            impact: number;
+            prices: number[];
+        };
+        PartPrices: {
+            compared: number;
+            up_count: number;
+            down_count: number;
+            /** Format: double */
+            impact: number;
+            /** Format: double */
+            min_change: number;
+            up: components["schemas"]["PartPrice"][];
+            down: components["schemas"]["PartPrice"][];
         };
         Parts: {
             job_count: number;
@@ -1045,19 +1171,58 @@ export interface components {
             repair_total: number;
             failure_count: number;
             reasons: components["schemas"]["WatchReason"][];
+            age: number | null;
+            car_type_name: string;
+            /** @description ค่าซ่อมรายเดือน ตรงกับ months */
+            monthly: number[];
+            /** @description มีเฉพาะคันที่ควรพิจารณาเปลี่ยน */
+            replace: components["schemas"]["WatchReplace"] | null;
         };
         WatchReason: {
-            code: components["schemas"]["CodeEnum"];
+            code: components["schemas"]["CodeFbfEnum"];
             label: string;
             detail: string;
+            /** @description ค่าหลักแบบสั้น (แสดงในตาราง/ป้าย) */
+            value: string;
+            /** @description คำอธิบายรองของค่าหลัก */
+            note: string;
+            /**
+             * Format: double
+             * @description ใช้เรียงในตัวกรองเหตุผลนี้ (มากไปน้อย)
+             */
+            sort: number;
         };
         WatchReasonCount: {
-            code: components["schemas"]["CodeEnum"];
+            code: components["schemas"]["CodeFbfEnum"];
             label: string;
             count: number;
         };
+        WatchReplace: {
+            /** @description เฉพาะสัญญาณที่ยังไม่มีป้ายของตัวเอง */
+            signals: components["schemas"]["WatchReplaceSignal"][];
+            /** @description ป้ายอื่นของคันนี้ที่นับรวมเป็นสัญญาณด้วย */
+            covered: string[];
+            /** Format: double */
+            annual_repair: number | null;
+        };
+        WatchReplaceSignal: {
+            code: components["schemas"]["WatchReplaceSignalCodeEnum"];
+            label: string;
+            value: string;
+        };
+        /**
+         * @description * `old` - old
+         *     * `costly` - costly
+         *     * `failure` - failure
+         *     * `downtime` - downtime
+         *     * `rising` - rising
+         * @enum {string}
+         */
+        WatchReplaceSignalCodeEnum: "old" | "costly" | "failure" | "downtime" | "rising";
         Watchlist: {
             car_count: number;
+            /** @description เดือนที่จบแล้ว */
+            months: string[];
             compared: boolean;
             reasons: components["schemas"]["WatchReasonCount"][];
             cars: components["schemas"]["WatchCar"][];
@@ -1367,6 +1532,7 @@ export interface operations {
         parameters: {
             query: {
                 branch_company_id?: string | null;
+                brand?: string | null;
                 car_dep?: number;
                 car_id?: number | null;
                 car_type?: number | null;

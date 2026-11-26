@@ -89,7 +89,7 @@ export function OpenJobs({
 
   return (
     <div className="grid grid-cols-1 gap-4">
-      <KpiStrip className="sm:grid-cols-3 xl:grid-cols-3">
+      <KpiStrip className="sm:grid-cols-2 xl:grid-cols-4">
         <Kpi label="ใบงานที่ยังไม่ปิด" value={num(data.total, 0)} unit="ใบ" />
         <Kpi
           label={`${noun}จอดซ่อมอยู่ตอนนี้`}
@@ -102,6 +102,13 @@ export function OpenJobs({
           value={num(data.stale_count, 0)}
           unit="ใบ"
           alert={data.stale_count > 0}
+        />
+        <Kpi
+          label="PO เลยกำหนดรับของ"
+          value={num(data.po_overdue_count, 0)}
+          unit="ใบ"
+          note="ของยังไม่เข้า รถจอดรอนานขึ้น"
+          alert={data.po_overdue_count > 0}
         />
       </KpiStrip>
 

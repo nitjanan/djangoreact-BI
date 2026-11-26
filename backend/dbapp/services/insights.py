@@ -115,6 +115,7 @@ def item(
     cars=(),
     points=(),
     hint="",
+    chart=None,
 ):
     return {
         "severity": severity,
@@ -128,6 +129,8 @@ def item(
         "cars": list(cars),
         "points": list(points),
         "hint": hint,
+        # กราฟที่เกี่ยวข้อง: กด hint แล้วเลื่อนไปที่กราฟนั้น (None = ไม่มีลิงก์)
+        "chart": chart,
     }
 
 
@@ -211,86 +214,6 @@ def overview(data, with_company, noun=DEFAULT_NOUN):
     return facts
 
 
-def urgent_cars(rows, with_company, noun=DEFAULT_NOUN):
-    """รถที่ติดทั้ง 10 อันดับค่าซ่อมสูงสุด และ 10 อันดับเสียบ่อยที่สุด"""
-    by_repair = sorted((r for r in rows if r["repair_total"] > 0), key=lambda r: -r["repair_total"])
-    by_failure = sorted(
-        (r for r in rows if r["failure_count"] >= 2), key=lambda r: -r["failure_count"]
-    )
-    top_failure = {(r["car_id"], r["branch_company_id"]) for r in by_failure[:TOP_N]}
-    hits = [r for r in by_repair[:TOP_N] if (r["car_id"], r["branch_company_id"]) in top_failure]
-    out = []
-    for r in hits[:3]:
-        facts = [f"เสีย {r['failure_count']} ครั้ง", f"ค่าซ่อม {baht(r['repair_total'])}"]
-        if r.get("mttr"):
-            facts.append(f"ซ่อมนานเฉลี่ย {r['mttr']:,.0f} ชม./ครั้ง")
-        out.append(
-            item(
-                HIGH,
-                "urgent",
-                f"{car_name(r, with_company)} เสียบ่อยและซ่อมแพง",
-                " · ".join(facts),
-                car_target(r),
-                points=facts,
-                hint=f"ติด {TOP_N} อันดับแรกทั้งค่าซ่อมและจำนวนครั้งที่เสีย "
-                f"ควรพิจารณาซ่อมใหญ่ครั้งเดียว หรือเทียบกับการเปลี่ยน{noun}ใหม่",
-            )
-        )
-    return out
-
-
-def costly_per_hour(rows, with_company, noun=DEFAULT_NOUN):
-    """ทำงานแล้วแต่ต้นทุนซ่อมต่อชั่วโมงสูงกว่าค่ากลางหลายเท่า"""
-    valid = [r for r in rows if r["work_total"] > 0 and r["repair_total"] > 0]
-    if len(valid) < MIN_CARS_TO_COMPARE:
-        return []
-    mid = median(r["repair_cost_per_hr"] for r in valid)
-    min_repair = median(r["repair_total"] for r in valid)
-    hits = sorted(
-        (
-            r
-            for r in valid
-            if mid > 0
-            and r["repair_cost_per_hr"] > mid * COST_PER_HR_FACTOR
-            and r["repair_total"] >= min_repair
-        ),
-        key=lambda r: -r["repair_cost_per_hr"],
-    )
-    if not hits:
-        return []
-    worst = hits[0]
-    ratio = worst["repair_cost_per_hr"] / mid
-    return [
-        item(
-            HIGH,
-            "urgent",
-            f"{noun} {len(hits)} คันค่าซ่อมแพงเกินงานที่ทำ",
-            f"ทำงาน 1 ชั่วโมงเสียค่าซ่อม {worst['repair_cost_per_hr']:,.0f} บาท "
-            f"ขณะที่{typical(noun)}เสีย {mid:,.0f} บาท ({times(ratio)})",
-            car_target(worst),
-            "ดูคันที่สูงที่สุด",
-            compare=compare(
-                worst["repair_cost_per_hr"],
-                mid,
-                f"{worst['repair_cost_per_hr']:,.0f} บาท/ชม.",
-                f"{mid:,.0f} บาท/ชม.",
-                f"{car_name(worst)} (สูงสุด)",
-                typical(noun),
-            ),
-            cars=[
-                car_entry(
-                    r,
-                    f"{r['repair_cost_per_hr']:,.0f} บาท/ชม. · "
-                    f"{times(r['repair_cost_per_hr'] / mid)}",
-                    with_company,
-                )
-                for r in hits[:MAX_LISTED]
-            ],
-            hint="ค่าซ่อมสูงแต่ใช้งานน้อย อาจจอดเสียบ่อยหรือไม่คุ้มซ่อม ควรดูว่าซ่อมอะไรไปบ้างก่อนอนุมัติงานซ่อมครั้งต่อไป",
-        )
-    ]
-
-
 def month_spikes(data, show_causes=True):
     """เดือนที่ค่าซ่อมสูงเกินช่วงปกติ (ค่าเฉลี่ย + 2 SD) พร้อมรถที่เป็นต้นเหตุ"""
     chart = data["charts"]["repair_vs_work"]
@@ -339,53 +262,10 @@ def month_spikes(data, show_causes=True):
                 compare=compare(v, avg, baht(v), baht(avg), f"เดือน{month}", "เดือนทั่วไป (เฉลี่ย)"),
                 cars=cars,
                 hint="ดูว่าเป็นงานซ่อมใหญ่ที่วางแผนไว้ หรือเสียกะทันหัน",
+                chart="repair_by_month",
             )
         )
     return out[:2]
-
-
-def fuel_hungry(rows, with_company, noun=DEFAULT_NOUN, fuel=FUEL_PER_HOUR):
-    """น้ำมันต่อชั่วโมง (หรือต่อ กม.) สูงกว่าค่ากลางของรถในตัวกรองเดียวกัน"""
-    field = fuel["field"]
-    valid = [r for r in rows if r[fuel["base"]] > 0 and r["oil_total"] > 0]
-    if len(valid) < MIN_CARS_TO_COMPARE:
-        return []
-    mid = median(r[field] for r in valid)
-    hits = sorted(
-        (r for r in valid if mid > 0 and r[field] > mid * FUEL_RATE_FACTOR),
-        key=lambda r: -r[field],
-    )
-    if not hits:
-        return []
-    worst = hits[0]
-    return [
-        item(
-            MEDIUM,
-            "efficiency",
-            f"{noun} {len(hits)} คันใช้น้ำมันมากกว่าคันอื่น",
-            f"{fuel['one']}ใช้น้ำมัน {worst[field]:,.2f} ลิตร "
-            f"ขณะที่{typical(noun)}ใช้ {mid:,.2f} ลิตร ({times(worst[field] / mid)})",
-            car_target(worst),
-            "ดูคันที่สูงที่สุด",
-            compare=compare(
-                worst[field],
-                mid,
-                f"{worst[field]:,.2f} {fuel['unit']}",
-                f"{mid:,.2f} {fuel['unit']}",
-                f"{car_name(worst)} (สูงสุด)",
-                typical(noun),
-            ),
-            cars=[
-                car_entry(
-                    r,
-                    f"{r[field]:,.2f} {fuel['unit']} · {times(r[field] / mid)}",
-                    with_company,
-                )
-                for r in hits[:MAX_LISTED]
-            ],
-            hint=fuel["hint"],
-        )
-    ]
 
 
 def _change(values):
@@ -406,12 +286,12 @@ def trends(data, partial_last_month, noun=DEFAULT_NOUN):
     recent_label = month_range(labels[-TREND_MONTHS:])
     before_label = month_range(labels[:-TREND_MONTHS])
     checks = [
-        ("จำนวนครั้งที่เสีย", rel["count"][trim], "{:,.1f} ครั้ง/เดือน"),
-        ("เวลาซ่อมเฉลี่ย", rel["mttr"][trim], "{:,.0f} ชม./ครั้ง"),
-        ("ค่าซ่อม", data["charts"]["repair_vs_work"]["repair"][trim], None),
+        ("จำนวนครั้งที่เสีย", rel["count"][trim], "{:,.1f} ครั้ง/เดือน", "reliability"),
+        ("เวลาซ่อมเฉลี่ย", rel["mttr"][trim], "{:,.0f} ชม./ครั้ง", "reliability"),
+        ("ค่าซ่อม", data["charts"]["repair_vs_work"]["repair"][trim], None, "repair_by_month"),
     ]
     out = []
-    for label, values, fmt in checks:
+    for label, values, fmt, chart in checks:
         result = _change(values)
         if not result:
             continue
@@ -437,6 +317,7 @@ def trends(data, partial_last_month, noun=DEFAULT_NOUN):
                 hint=""
                 if better
                 else f"ดูกราฟรายเดือนด้านล่างว่าเพิ่มขึ้นจาก{noun}คันไหนหรือประเภทงานซ่อมอะไร",
+                chart=None if better else chart,
             )
         )
     return out
@@ -569,11 +450,10 @@ def build_insights(
             ]
     else:
         lines = overview(data, with_company, noun)
+        # รายชื่อรถที่ผิดปกติ (ซ่อมแพง/เสียบ่อย/กินน้ำมัน) อยู่ใน "รถที่ต้องจับตา" ที่เดียว
+        # ส่วนนี้เหลือเฉพาะภาพรวม: เดือนที่พุ่ง แนวโน้ม และคุณภาพข้อมูล
         items = (
-            urgent_cars(rows, with_company, noun)
-            + costly_per_hour(rows, with_company, noun)
-            + month_spikes(data)
-            + fuel_hungry(rows, with_company, noun, fuel)
+            month_spikes(data)
             + trends(data, partial_last_month, noun)
             + data_quality(data, rows, unmatched_total, no_dep_cars)
         )

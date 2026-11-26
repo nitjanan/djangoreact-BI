@@ -18,6 +18,7 @@ export function ChartCard({
   rows,
   empty,
   className,
+  actions,
   children,
 }: {
   title: string
@@ -31,6 +32,8 @@ export function ChartCard({
   /** true = ไม่มีข้อมูล แสดงข้อความแทนกราฟ */
   empty?: boolean
   className?: string
+  /** ปุ่มเพิ่มเติมที่หัวกราฟ เช่น ปุ่มสลับมุมมอง */
+  actions?: ReactNode
   children: ReactNode
 }) {
   const noun = useNoun()
@@ -62,6 +65,8 @@ export function ChartCard({
             </button>
           )}
         </div>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {actions}
         {rows && !empty && (
           <Button
             variant="ghost"
@@ -74,6 +79,7 @@ export function ChartCard({
             Excel
           </Button>
         )}
+        </div>
       </figcaption>
       {help && helpOpen && (
         <div

@@ -97,6 +97,7 @@ def test_stage_counts_and_overdue_po(setup):
     assert waiting["stage_label"] == "รอของ"
     assert waiting["stage_days"] == 9
     assert waiting["po_overdue"] is True
+    assert result["po_overdue_count"] == 1
     assert waiting["broke_reason"] == "ล้อระเบิด"
     assert waiting["documents"] == [{"type": "PO", "ref_no": "PO-1"}]
 

@@ -108,7 +108,8 @@ def test_dashboard_all_companies_only_includes_visible_ones(client):
     assert body["reliability"]["failure_count"] == 1
     assert body["reliability"]["mttr"] == 4
     assert body["open_jobs"]["total"] == 0
-    assert body["watchlist"]["cars"] == []
+    # ข้อมูลทดสอบมีแค่ต้นปี เดือนหลังจากนั้นไม่มีงานและไม่เติมน้ำมัน จึงติดแค่ "ใช้งานน้อย"
+    assert {r["code"] for c in body["watchlist"]["cars"] for r in c["reasons"]} <= {"low_use"}
 
 
 def test_dashboard_single_company(client):
@@ -729,3 +730,114 @@ def test_merge_only_for_vehicle_truck_heavy_machine_and_drill():
     assert [d for d in range(1, 7) if merges_companies("ALL", d, ["01", "02"])] == [1, 2, 3, 6]
     assert not merges_companies("C01", 1, ["01", "02"])
     assert not merges_companies("ALL", 1, ["01"])
+
+
+def test_brand_filters_whole_dashboard_like_car_type(client):
+    BaseCar.objects.filter(id=1).update(brand="Volvo ")
+    BaseCar.objects.filter(id=2).update(brand="ISUZU")
+
+    body = dashboard(client, company="ALL").json()
+    assert body["filters"]["brand"] is None
+    assert {b["key"]: b["count"] for b in body["brands"]} == {"VOLVO": 1, "ISUZU": 1}
+    assert next(b for b in body["brands"] if b["key"] == "VOLVO")["label"] == "Volvo"
+
+    body = dashboard(client, company="ALL", brand="VOLVO").json()
+    assert body["filters"]["brand"] == "VOLVO"
+    assert [r["car_id"] for r in body["car_table"]["rows"]] == [1]
+    assert body["car_table"]["totals"]["repair_total"] == 1000
+    assert body["charts"]["repair_by_type"]["total"] == 1000  # กราฟกรองตามยี่ห้อด้วย
+    assert body["reliability"]["failure_count"] == 1
+    assert len(body["brands"]) == 2  # ยังเลือกยี่ห้ออื่นได้
+
+    body = dashboard(client, company="ALL", brand="ISUZU").json()
+    assert body["charts"]["repair_by_type"]["total"] == 500
+    assert body["reliability"]["failure_count"] == 0
+
+    # ยี่ห้อที่ไม่มีในตัวกรองนี้ -> ทุกยี่ห้อ
+    body = dashboard(client, company="ALL", brand="NOPE").json()
+    assert body["filters"]["brand"] is None
+    assert body["charts"]["repair_by_type"]["total"] == 1500
+
+
+def test_car_history_lists_jobs_by_expense_department(client):
+    def job(company_id, car_id, dept, name, hours, km=0):
+        SummaryCarJob.objects.create(
+            branch_company_id=company_id, car_id=car_id, car_dep_id=1, year=YEAR, month=1,
+            summary_date=date(YEAR, 1, 1), expense_dept_id=dept and dept[:2],
+            expense_dept_name=dept, job=name, hours=hours, km=km, trips=1, days=1,
+        )  # fmt: skip
+
+    job("01", 1, "งานขนส่ง", "ส่งหิน", 5, km=40)
+    job("01", 1, "งานขนส่ง", "ส่งทราย", 3)
+    job("01", 1, "", "", 2)  # ไม่ระบุแผนก -> อยู่ท้าย
+    job("02", 1, "งานขนส่ง", "ส่งหิน", 100)  # บริษัทอื่น ไม่นับ
+    job("01", 2, "งานขนส่ง", "ส่งหิน", 100)  # คันอื่น ไม่นับ
+
+    jobs = client.get("/api/car-history/1/", {"branch_company_id": "01"}).json()["jobs"]
+    assert jobs["hours"] == 10 and jobs["km"] == 40 and jobs["trips"] == 3
+    assert [d["name"] for d in jobs["departments"]][0] == "งานขนส่ง"
+    assert not jobs["departments"][-1]["assigned"]
+    assert [j["job"] for j in jobs["departments"][0]["jobs"]] == ["ส่งหิน", "ส่งทราย"]
+
+    # แถวที่รวมหลายบริษัท: นับทุกบริษัท
+    merged = client.get("/api/car-history/1/", {"branch_company_id": "01,02"}).json()["jobs"]
+    assert merged["hours"] == 110
+
+
+def test_impossible_meter_hours_are_left_out(client):
+    heavy = BaseCarDepartment.objects.create(id=3, name="เครื่องจักรกลหนัก")
+    co1 = BaseBranchCompany.objects.get(id="01")
+    car = BaseCar.objects.create(id=30, code="C8", name="ZW200", car_dep=heavy)
+
+    def month(m, hours, days):
+        common = dict(
+            branch_company=co1, car=car, car_dep=heavy, year=YEAR, month=m,
+            month_th="", summary_date=date(YEAR, m, 1),
+        )  # fmt: skip
+        SummaryWork.objects.create(**common, sum_diff_mile=hours, count_diff_time=days, percent=0)
+        SummaryRepair.objects.create(**common, repair_name="เครื่องยนต์", amount=1000)
+        SummaryOil.objects.create(**common, sum_liter=100, sum_km=0, liter_per_km=0)
+
+    month(1, 200, 20)  # ปกติ
+    month(2, -203533, 7)  # เลขหน้าปัดผิด ติดลบ
+    month(3, 8620, 25)  # เกิน 24 ชม./วัน
+
+    body = dashboard(client, company="ALL", car_dep=3).json()
+    totals = body["car_table"]["totals"]
+    assert totals["work_total"] == 200
+    assert totals["repair_cost_per_hr"] == pytest.approx(3000 / 200)
+    assert totals["fuel_rate"] == pytest.approx(300 / 200)
+    assert body["charts"]["work_by_month"]["hours"] == [200]
+
+    history = client.get("/api/car-history/30/", {"branch_company_id": "01"}).json()
+    assert history["totals"]["work_total"] == 200
+    assert history["monthly"]["work"] == [200, 0, 0]
+
+    # ยานพาหนะ (แผนก 1) ใช้ SummaryWork แค่นับวัน: ไม่ตัดแถวที่เลขไมล์ติดลบ
+    car1 = BaseCar.objects.get(id=1)
+    SummaryWork.objects.filter(car=car1).update(sum_diff_mile=-500)
+    row = next(
+        r for r in dashboard(client, company="C01").json()["car_table"]["rows"] if r["car_id"] == 1
+    )
+    assert row["work_total"] == 0 and row["percent_ma"] == 0  # ชั่วโมงมาจากงาน (ไม่มีในชุดนี้)
+
+
+def test_meter_hours_from_webstock_replace_month_difference(client):
+    heavy = BaseCarDepartment.objects.create(id=3, name="เครื่องจักรกลหนัก")
+    co1 = BaseBranchCompany.objects.get(id="01")
+    car = BaseCar.objects.create(id=30, code="C21", name="EC360", car_dep=heavy)
+    common = dict(branch_company=co1, car=car, car_dep=heavy, year=YEAR, count_diff_time=20)
+    for m, mile, meter in ((1, 200, 180), (2, -203533, 150), (3, 300, None)):
+        SummaryWork.objects.create(
+            **common, month=m, month_th="", summary_date=date(YEAR, m, 1),
+            sum_diff_mile=mile, meter_hours=meter, percent=0,
+        )  # fmt: skip
+
+    body = dashboard(client, company="ALL", car_dep=3).json()
+    # ม.ค./ก.พ. ใช้ชั่วโมงรายวันจาก webstock (ก.พ. ไม่ถูกตัดแม้ผลต่างเลขไมล์ติดลบ)
+    # มี.ค. ไม่มี meter_hours ใช้ผลต่างเลขไมล์เดิม
+    assert body["car_table"]["totals"]["work_total"] == 180 + 150 + 300
+    assert body["charts"]["work_by_month"]["hours"] == [180, 150, 300]
+
+    history = client.get("/api/car-history/30/", {"branch_company_id": "01"}).json()
+    assert history["totals"]["work_total"] == 630

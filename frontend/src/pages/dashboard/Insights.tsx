@@ -1,4 +1,5 @@
 import {
+  ArrowDown,
   ArrowRight,
   ChevronRight,
   CircleAlert,
@@ -16,6 +17,21 @@ import { useNoun } from "./export-context";
 
 type Item = Schemas["InsightItem"];
 type SelectCar = (carId: number, branchCompanyId: string) => void;
+
+/** id ของกราฟในหน้า dashboard ที่ hint ลิงก์ไปได้ */
+export const chartAnchorId = (chart: NonNullable<Item["chart"]>) =>
+  `chart-${chart.replaceAll("_", "-")}`;
+
+/** เลื่อนไปที่กราฟ แล้วกระพริบกรอบให้เห็นว่าคือกราฟไหน */
+function scrollToChart(chart: NonNullable<Item["chart"]>) {
+  const el = document.getElementById(chartAnchorId(chart));
+  if (!el) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  el.classList.remove("chart-flash");
+  void el.offsetWidth; // เริ่มแอนิเมชันใหม่ถ้ากดซ้ำ
+  el.classList.add("chart-flash");
+}
 
 const SEVERITY: Record<
   Item["severity"],
@@ -224,18 +240,38 @@ function InsightCard({
         </div>
       )}
 
-      {item.hint && (
-        <p className="flex gap-1.5 text-sm text-muted-foreground">
-          <Lightbulb
-            className="mt-0.5 size-3.5 shrink-0 text-[#b07800]"
-            aria-hidden
-          />
-          <span>
-            <span className="sr-only">ควรทำ: </span>
-            {item.hint}
-          </span>
-        </p>
-      )}
+      {item.hint &&
+        (item.chart ? (
+          <button
+            type="button"
+            onClick={() => item.chart && scrollToChart(item.chart)}
+            className="group -mx-1.5 flex gap-1.5 rounded-md px-1.5 py-1 text-left text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <Lightbulb
+              className="mt-0.5 size-3.5 shrink-0 text-[#b07800]"
+              aria-hidden
+            />
+            <span className="min-w-0 flex-1">
+              <span className="sr-only">ควรทำ: </span>
+              {item.hint}
+              <span className="ml-1 inline-flex items-center gap-0.5 font-medium whitespace-nowrap text-primary group-hover:underline">
+                ไปที่กราฟ
+                <ArrowDown className="size-3.5" aria-hidden />
+              </span>
+            </span>
+          </button>
+        ) : (
+          <p className="flex gap-1.5 text-sm text-muted-foreground">
+            <Lightbulb
+              className="mt-0.5 size-3.5 shrink-0 text-[#b07800]"
+              aria-hidden
+            />
+            <span>
+              <span className="sr-only">ควรทำ: </span>
+              {item.hint}
+            </span>
+          </p>
+        ))}
 
       {item.target && item.cars.length === 0 && (
         <button

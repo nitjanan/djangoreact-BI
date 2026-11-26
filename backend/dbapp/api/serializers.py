@@ -89,6 +89,9 @@ class DashboardQuerySerializer(serializers.Serializer):
     )
     car_dep = serializers.IntegerField(required=False, default=1)
     car_type = serializers.IntegerField(required=False, allow_null=True, default=None)
+    brand = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, default=None, max_length=100
+    )
     car_id = serializers.IntegerField(required=False, allow_null=True, default=None)
     branch_company_id = serializers.CharField(required=False, allow_null=True, default=None)
 
@@ -107,6 +110,7 @@ class DashboardFiltersSerializer(serializers.Serializer):
     fuel_unit = serializers.CharField()
     unit_noun = serializers.CharField(help_text="ชื่อแผนกที่เลือก ใช้แทนคำว่า รถ บนหน้าเว็บ")
     car_type = serializers.IntegerField(allow_null=True)
+    brand = serializers.CharField(allow_null=True, help_text="key ของยี่ห้อที่เลือก (BrandOption.key)")
     car_id = serializers.IntegerField(allow_null=True)
     branch_company_id = serializers.CharField(allow_null=True)
 
@@ -353,6 +357,7 @@ class OpenJobsSerializer(serializers.Serializer):
     immobile_car_count = serializers.IntegerField()
     stale_count = serializers.IntegerField()
     stale_days = serializers.IntegerField()
+    po_overdue_count = serializers.IntegerField(help_text="ใบที่ PO เลยกำหนดรับของแล้ว")
     has_process = serializers.BooleanField()
     buckets = OpenJobBucketSerializer(many=True)
     stages = OpenJobStageSerializer(many=True)
@@ -368,13 +373,39 @@ class TopPartSerializer(serializers.Serializer):
     jobs = serializers.IntegerField()
 
 
-WATCH_REASONS = ["stale", "cost", "replace", "repeat", "failure", "fuel"]
+WATCH_REASONS = [
+    "stale",
+    "cost",
+    "replace",
+    "repeat",
+    "failure",
+    "fuel",
+    "fuel_spike",
+    "low_use",
+]
 
 
 class WatchReasonSerializer(serializers.Serializer):
     code = serializers.ChoiceField(choices=WATCH_REASONS)
     label = serializers.CharField()
     detail = serializers.CharField()
+    value = serializers.CharField(help_text="ค่าหลักแบบสั้น (แสดงในตาราง/ป้าย)")
+    note = serializers.CharField(allow_blank=True, help_text="คำอธิบายรองของค่าหลัก")
+    sort = serializers.FloatField(help_text="ใช้เรียงในตัวกรองเหตุผลนี้ (มากไปน้อย)")
+
+
+class WatchReplaceSignalSerializer(serializers.Serializer):
+    code = serializers.ChoiceField(choices=["old", "costly", "failure", "downtime", "rising"])
+    label = serializers.CharField()
+    value = serializers.CharField()
+
+
+class WatchReplaceSerializer(serializers.Serializer):
+    signals = WatchReplaceSignalSerializer(many=True, help_text="เฉพาะสัญญาณที่ยังไม่มีป้ายของตัวเอง")
+    covered = serializers.ListField(
+        child=serializers.CharField(), help_text="ป้ายอื่นของคันนี้ที่นับรวมเป็นสัญญาณด้วย"
+    )
+    annual_repair = serializers.FloatField(allow_null=True)
 
 
 class WatchCarSerializer(serializers.Serializer):
@@ -386,6 +417,12 @@ class WatchCarSerializer(serializers.Serializer):
     repair_total = serializers.FloatField()
     failure_count = serializers.IntegerField()
     reasons = WatchReasonSerializer(many=True)
+    age = serializers.IntegerField(allow_null=True)
+    car_type_name = serializers.CharField(allow_blank=True)
+    monthly = serializers.ListField(
+        child=serializers.FloatField(), help_text="ค่าซ่อมรายเดือน ตรงกับ months"
+    )
+    replace = WatchReplaceSerializer(allow_null=True, help_text="มีเฉพาะคันที่ควรพิจารณาเปลี่ยน")
 
 
 class WatchReasonCountSerializer(serializers.Serializer):
@@ -396,6 +433,7 @@ class WatchReasonCountSerializer(serializers.Serializer):
 
 class WatchlistSerializer(serializers.Serializer):
     car_count = serializers.IntegerField()
+    months = serializers.ListField(child=serializers.CharField(), help_text="เดือนที่จบแล้ว")
     compared = serializers.BooleanField()
     reasons = WatchReasonCountSerializer(many=True)
     cars = WatchCarSerializer(many=True)
@@ -445,6 +483,11 @@ class InsightItemSerializer(serializers.Serializer):
     cars = InsightCarSerializer(many=True)
     points = serializers.ListField(child=serializers.CharField())
     hint = serializers.CharField(allow_blank=True)
+    chart = serializers.ChoiceField(
+        choices=["repair_by_month", "reliability"],
+        allow_null=True,
+        help_text="กราฟที่เกี่ยวข้อง: กด hint แล้วเลื่อนไปที่กราฟนั้น",
+    )
 
 
 class OverviewFactSerializer(serializers.Serializer):
@@ -540,9 +583,95 @@ class ModelBenchmarkSerializer(serializers.Serializer):
     type = BenchmarkMetricsSerializer(allow_null=True)
 
 
+class BrandOptionSerializer(serializers.Serializer):
+    key = serializers.CharField(help_text="ยี่ห้อที่ตัดช่องว่าง/ขีดออก ใช้เป็นค่าตัวกรอง brand")
+    label = serializers.CharField()
+    count = serializers.IntegerField(help_text="จำนวนคันในตารางรถ")
+
+
+class FleetCarSerializer(serializers.Serializer):
+    car_id = serializers.IntegerField()
+    branch_company_id = serializers.CharField()
+    label = serializers.CharField()
+    company = serializers.CharField(allow_blank=True)
+
+
+class DowntimeSpanSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    open = serializers.BooleanField()
+    ref_no = serializers.CharField(allow_blank=True)
+    broke_reason = serializers.CharField(allow_blank=True)
+
+
+class DowntimeCarSerializer(FleetCarSerializer):
+    hours = serializers.FloatField()
+    open = serializers.BooleanField()
+    spans = DowntimeSpanSerializer(many=True)
+
+
+class DowntimeSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    car_count = serializers.IntegerField()
+    open_car_count = serializers.IntegerField()
+    hours = serializers.FloatField()
+    daily = serializers.ListField(
+        child=serializers.IntegerField(), help_text="จำนวนรถที่หยุดในแต่ละวัน เริ่มที่ start"
+    )
+    peak = serializers.IntegerField()
+    peak_date = serializers.DateField(allow_null=True)
+    cars = DowntimeCarSerializer(many=True)
+
+
+class PartPriceSerializer(serializers.Serializer):
+    stkcod = serializers.CharField()
+    name = serializers.CharField(allow_blank=True)
+    unit = serializers.CharField(allow_blank=True)
+    first_date = serializers.DateField()
+    first_price = serializers.FloatField()
+    last_date = serializers.DateField()
+    last_price = serializers.FloatField()
+    change = serializers.FloatField(help_text="%")
+    period_qty = serializers.FloatField()
+    impact = serializers.FloatField()
+    prices = serializers.ListField(child=serializers.FloatField())
+
+
+class PartPricesSerializer(serializers.Serializer):
+    compared = serializers.IntegerField()
+    up_count = serializers.IntegerField()
+    down_count = serializers.IntegerField()
+    impact = serializers.FloatField()
+    min_change = serializers.FloatField()
+    up = PartPriceSerializer(many=True)
+    down = PartPriceSerializer(many=True)
+
+
+class ForecastSeriesSerializer(serializers.Serializer):
+    expected = serializers.FloatField()
+    low = serializers.FloatField()
+    high = serializers.FloatField()
+    month_to_date = serializers.FloatField()
+    history = serializers.ListField(child=serializers.FloatField(), help_text="ตรงกับ labels")
+
+
+class ForecastSerializer(serializers.Serializer):
+    labels = serializers.ListField(child=serializers.CharField(), help_text="เดือนที่จบแล้ว")
+    current_label = serializers.CharField()
+    next_label = serializers.CharField()
+    day = serializers.IntegerField()
+    days_in_month = serializers.IntegerField()
+    base_months = serializers.IntegerField()
+    range_months = serializers.IntegerField()
+    repair = ForecastSeriesSerializer()
+    oil = ForecastSeriesSerializer()
+
+
 class DashboardSerializer(serializers.Serializer):
     filters = DashboardFiltersSerializer()
     car_types = CarTypeSerializer(many=True)
+    brands = BrandOptionSerializer(many=True)
     selected_car = CarRowSerializer(allow_null=True)
     car_table = CarTableSerializer()
     charts = ChartsSerializer()
@@ -552,6 +681,11 @@ class DashboardSerializer(serializers.Serializer):
     parts = PartsSerializer()
     jobs = JobsSerializer()
     watchlist = WatchlistSerializer()
+    downtime = DowntimeSerializer()
+    part_prices = PartPricesSerializer()
+    forecast = ForecastSerializer(
+        allow_null=True, help_text="null = ไม่ได้ดูปีปัจจุบันถึงเดือนปัจจุบัน หรือข้อมูลไม่ถึง 3 เดือน"
+    )
     model_comparison = ModelComparisonSerializer()
     branch_compare = BranchCompareSerializer(many=True, help_text="ว่าง = ดูบริษัทเดียวหรือเลือกรถคันเดียว")
     model_benchmark = ModelBenchmarkSerializer(
@@ -658,6 +792,7 @@ class CarHistorySerializer(serializers.Serializer):
     doc_jobs = CarHistoryDocJobSerializer(
         many=True, help_text="การซ่อมจากใบจ่ายอะไหล่ของรถที่ไม่มีใบแจ้งซ่อม ใหม่ -> เก่า"
     )
+    jobs = JobsSerializer(help_text="งานที่ทำจากบันทึกการใช้รถ แยกตามแผนกค่าใช้จ่าย")
 
 
 # ------------------------------------------------------------------ sync

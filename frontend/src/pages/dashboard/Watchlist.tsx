@@ -1,10 +1,18 @@
-import { ChevronDown, ChevronRight, FileSpreadsheet } from "lucide-react";
+import { ChevronDown, FileSpreadsheet } from "lucide-react";
 import { useState } from "react";
 
 import type { Schemas } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { downloadExcel } from "@/lib/export-excel";
 import { num } from "@/lib/format";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 import { useExportFilters, useNoun } from "./export-context";
@@ -23,10 +31,18 @@ const REASON_TONE: Record<ReasonCode, string> = {
   repeat: "bg-chart-4/20 text-[color-mix(in_oklab,var(--chart-4)_55%,black)]",
   failure: "bg-chart-4/20 text-[color-mix(in_oklab,var(--chart-4)_55%,black)]",
   fuel: "bg-muted text-muted-foreground",
+  fuel_spike: "bg-chart-4/20 text-[color-mix(in_oklab,var(--chart-4)_55%,black)]",
+  low_use: "bg-chart-1/15 text-[color-mix(in_oklab,var(--chart-1)_55%,black)]",
 };
 
-const carName = (c: WatchCar) =>
-  [c.code, c.name].filter(Boolean).join(" ") || "ไม่ระบุ";
+// สีของสัญญาณ "ควรพิจารณาเปลี่ยน" ใช้ชุดสีเดียวกับป้ายเหตุผล
+const SIGNAL_TONE: Record<string, string> = {
+  rising: REASON_TONE.cost,
+  costly: REASON_TONE.cost,
+  downtime: REASON_TONE.failure,
+  failure: REASON_TONE.failure,
+  old: "bg-chart-1/15 text-[color-mix(in_oklab,var(--chart-1)_55%,black)]",
+};
 
 export function Watchlist({
   data,
@@ -54,8 +70,13 @@ export function Watchlist({
     );
   }
 
+  // ตัวกรองเหตุผล: เรียงตามค่าหลักของเหตุผลนั้น (reason.sort มากไปน้อย)
+  const sortKey = (c: WatchCar) =>
+    c.reasons.find((r) => r.code === reason)?.sort ?? 0;
   const cars = reason
-    ? data.cars.filter((c) => c.reasons.some((r) => r.code === reason))
+    ? data.cars
+        .filter((c) => c.reasons.some((r) => r.code === reason))
+        .sort((a, b) => sortKey(b) - sortKey(a))
     : data.cars;
   const shown = showAll ? cars : cars.slice(0, PREVIEW_ROWS);
 
@@ -140,7 +161,7 @@ export function Watchlist({
 
       <div className="grid gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-medium">เรียงตามจำนวนเรื่องที่ติด</h3>
+          <h3 className="text-sm font-medium">{SORT_NOTE[reason ?? "all"]}</h3>
           <Button
             variant="ghost"
             size="sm"
@@ -153,15 +174,12 @@ export function Watchlist({
           </Button>
         </div>
 
-        <ul className="divide-y border-t">
-          {shown.map((c) => (
-            <CarRow
-              key={`${c.car_id}-${c.branch_company_id}`}
-              car={c}
-              onSelectCar={onSelectCar}
-            />
-          ))}
-        </ul>
+        <WatchTable
+          cars={shown}
+          months={data.months}
+          reason={reason}
+          onSelectCar={onSelectCar}
+        />
 
         {cars.length > PREVIEW_ROWS && (
           <Button
@@ -184,55 +202,202 @@ export function Watchlist({
   );
 }
 
-function CarRow({
-  car: c,
+// หัวคอลัมน์ค่าหลักของแต่ละตัวกรอง (ค่าและคำอธิบายมาจาก reason.value / reason.note)
+const METRIC_HEAD: Record<ReasonCode, string> = {
+  stale: "ค้างซ่อม",
+  cost: "ค่าซ่อม/ชม.",
+  replace: "ค่าซ่อม/ปี",
+  repeat: "แจ้งซ่อมซ้ำ",
+  failure: "เสีย",
+  fuel: "อัตราน้ำมัน",
+  fuel_spike: "น้ำมันเกินปกติ",
+  low_use: "การใช้งาน",
+};
+
+const SORT_NOTE: Record<ReasonCode | "all", string> = {
+  all: "เรียงตามจำนวนเรื่องที่ติด · กดแถวเพื่อดูคันนั้น",
+  stale: "เรียงตามจำนวนวันที่ค้างซ่อม · กดแถวเพื่อดูคันนั้น",
+  cost: "เรียงตามค่าซ่อม/ชม. เทียบกับคันส่วนใหญ่ · กดแถวเพื่อดูคันนั้น",
+  replace:
+    "เรียงตามค่าซ่อมต่อปี (ค่าซ่อมเฉลี่ยรายเดือนของเดือนที่จบแล้ว × 12 ใช้เทียบกับราคารถใหม่) · กดแถวเพื่อดูคันนั้น",
+  repeat: "เรียงตามจำนวนครั้งที่แจ้งซ่อมซ้ำ · กดแถวเพื่อดูคันนั้น",
+  failure: "เรียงตามความถี่ที่เสียเทียบกับคันส่วนใหญ่ · กดแถวเพื่อดูคันนั้น",
+  fuel: "เรียงตามอัตราน้ำมันเทียบกับคันส่วนใหญ่ · กดแถวเพื่อดูคันนั้น",
+  fuel_spike:
+    "เดือนที่ใช้น้ำมันต่องานสูงกว่าปกติของคันนั้นเอง 1.3 เท่าขึ้นไป · เรียงตามลิตรที่เกิน (น้ำมันรั่ว เครื่องผิดปกติ หรือบันทึกไม่ครบ) · กดแถวเพื่อดูคันนั้น",
+  low_use:
+    "จอดนิ่ง (ไม่มีงานและไม่เติมน้ำมัน 2 เดือนล่าสุดขึ้นไป) อยู่บนสุด ตามด้วยคันที่ชั่วโมงต่ำกว่า 30% ของคันส่วนใหญ่ · กดแถวเพื่อดูคันนั้น",
+};
+
+const carName = (c: WatchCar) =>
+  [c.code, c.name].filter(Boolean).join(" ") || "ไม่ระบุ";
+
+const MONTH_SHORT: Record<string, string> = {
+  มกราคม: "ม.ค.", กุมภาพันธ์: "ก.พ.", มีนาคม: "มี.ค.", เมษายน: "เม.ย.",
+  พฤษภาคม: "พ.ค.", มิถุนายน: "มิ.ย.", กรกฎาคม: "ก.ค.", สิงหาคม: "ส.ค.",
+  กันยายน: "ก.ย.", ตุลาคม: "ต.ค.", พฤศจิกายน: "พ.ย.", ธันวาคม: "ธ.ค.",
+}; // prettier-ignore
+
+/** กราฟแท่งค่าซ่อมรายเดือน: แท่งสีส้ม = เดือนที่สูงสุด */
+function MonthlyBars({ values, months }: { values: number[]; months: string[] }) {
+  const top = Math.max(...values, 0);
+  if (top <= 0) return <span className="text-xs text-muted-foreground">ไม่มีค่าซ่อม</span>;
+  const peak = values.indexOf(top);
+  return (
+    <div className="grid w-44 gap-0.5">
+      <div
+        className="flex h-8 items-end gap-px"
+        role="img"
+        aria-label={values.map((v, i) => `${months[i]} ${num(v, 0)} บาท`).join(", ")}
+      >
+        {values.map((v, i) => (
+          <span
+            key={i}
+            title={`${months[i]}: ${num(v, 0)} บาท`}
+            className={cn("min-w-0 flex-1 rounded-t-sm", i === peak ? "bg-signal" : "bg-chart-1/55")}
+            style={{ height: v > 0 ? `${Math.max((v / top) * 100, 4)}%` : "1px" }}
+          />
+        ))}
+      </div>
+      <div className="flex justify-between text-[10px] text-muted-foreground">
+        <span>{MONTH_SHORT[months[0]] ?? months[0]}</span>
+        <span>
+          สูงสุด {MONTH_SHORT[months[peak]] ?? months[peak]} {num(values[peak], 0)}
+        </span>
+        <span>{MONTH_SHORT[months[months.length - 1]] ?? months[months.length - 1]}</span>
+      </div>
+    </div>
+  );
+}
+
+function Chip({ tone, label, value }: { tone: string; label: string; value?: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-baseline gap-1 rounded px-1.5 py-px text-xs whitespace-nowrap",
+        tone,
+      )}
+    >
+      <span className="font-medium">{label}</span>
+      {value && <span className="font-semibold tabular-nums">{value}</span>}
+    </span>
+  );
+}
+
+/** ตารางรถที่ต้องจับตา: ทุกตัวกรองใช้รูปแบบเดียวกัน ต่างกันที่คอลัมน์ค่าหลักและป้าย */
+function WatchTable({
+  cars,
+  months,
+  reason,
   onSelectCar,
 }: {
-  car: WatchCar;
+  cars: WatchCar[];
+  months: string[];
+  reason: ReasonCode | null;
   onSelectCar: (carId: number, branchCompanyId: string) => void;
 }) {
+  const metricHead = reason ? METRIC_HEAD[reason] : "ค่าซ่อมรวม";
+  const chipsHead =
+    reason === null ? "เรื่องที่ติด" : reason === "replace" ? "สัญญาณ" : "เรื่องอื่นที่ติด";
   return (
-    <li>
-      <button
-        type="button"
-        onClick={() => onSelectCar(c.car_id, c.branch_company_id)}
-        title="เลือกคันนี้"
-        className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1.5 px-1 py-2.5 text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring sm:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)_auto]"
-      >
-        <span className="min-w-0">
-          <span className="block truncate font-medium">{carName(c)}</span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {c.branch_company_name} · ค่าซ่อม {num(c.repair_total, 0)} บาท
-          </span>
-        </span>
-
-        <ul className="col-span-2 row-start-2 grid min-w-0 gap-1 text-sm sm:col-span-1 sm:row-start-auto">
-          {c.reasons.map((r) => (
-            <li
-              key={r.code}
-              className="flex min-w-0 flex-wrap items-baseline gap-x-2"
-            >
-              <span
-                className={cn(
-                  "rounded px-1.5 py-px text-xs font-medium whitespace-nowrap",
-                  REASON_TONE[r.code],
-                )}
+    <div className="border-t">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>คัน</TableHead>
+            <TableHead className="text-right">อายุ</TableHead>
+            <TableHead className="text-right">{metricHead}</TableHead>
+            <TableHead>{chipsHead}</TableHead>
+            <TableHead>ค่าซ่อมรายเดือน</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {cars.map((c) => {
+            const active = reason ? c.reasons.find((r) => r.code === reason) : undefined;
+            const others = c.reasons.filter((r) => r.code !== reason);
+            return (
+              <TableRow
+                key={`${c.car_id}-${c.branch_company_id}`}
+                className="cursor-pointer"
+                onClick={() => onSelectCar(c.car_id, c.branch_company_id)}
               >
-                {r.label}
-              </span>
-              <span className="min-w-0 text-muted-foreground">{r.detail}</span>
-            </li>
-          ))}
-        </ul>
-
-        <span className="col-start-2 row-start-1 inline-flex items-center gap-0.5 justify-self-end text-xs text-primary sm:col-start-auto sm:row-start-auto">
-          ดูคันนี้
-          <ChevronRight
-            className="size-3.5 transition-transform group-hover:translate-x-0.5"
-            aria-hidden
-          />
-        </span>
-      </button>
-    </li>
+                <TableCell className="max-w-56">
+                  <button
+                    type="button"
+                    className="block max-w-full truncate text-left font-medium hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectCar(c.car_id, c.branch_company_id);
+                    }}
+                  >
+                    {carName(c)}
+                  </button>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {[c.branch_company_name, c.car_type_name].filter(Boolean).join(" · ")}
+                  </div>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {c.age != null ? `${c.age} ปี` : "-"}
+                </TableCell>
+                <TableCell className="w-44 min-w-36 text-right whitespace-normal">
+                  <div className="font-semibold whitespace-nowrap tabular-nums">
+                    {active ? active.value : `${num(c.repair_total, 0)} บาท`}
+                  </div>
+                  {active && reason !== "replace" && active.note && (
+                    <div className="text-xs leading-snug text-muted-foreground">
+                      {active.note}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="min-w-56 whitespace-normal">
+                  <div className="flex max-w-80 flex-wrap gap-1">
+                    {reason === "replace" && c.replace ? (
+                      <>
+                        {c.replace.signals.map((s) => (
+                          <Chip
+                            key={s.code}
+                            tone={SIGNAL_TONE[s.code] ?? REASON_TONE.fuel}
+                            label={s.label}
+                            value={s.value}
+                          />
+                        ))}
+                        {c.replace.covered.map((label) => {
+                          const code = c.reasons.find((r) => r.label === label)?.code;
+                          return (
+                            <Chip
+                              key={label}
+                              tone={code ? REASON_TONE[code] : REASON_TONE.fuel}
+                              label={label}
+                            />
+                          );
+                        })}
+                      </>
+                    ) : others.length ? (
+                      others.map((r) => (
+                        <Chip
+                          key={r.code}
+                          tone={REASON_TONE[r.code]}
+                          label={r.label}
+                          value={r.value}
+                        />
+                      ))
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  {c.monthly.length > 1 ? (
+                    <MonthlyBars values={c.monthly} months={months} />
+                  ) : (
+                    "-"
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }

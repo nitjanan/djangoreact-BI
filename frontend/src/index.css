@@ -155,3 +155,12 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* กดลิงก์ "ไปที่กราฟ" ในข้อสังเกต: กรอบกระพริบให้รู้ว่าคือกราฟไหน */
+@keyframes chart-flash {
+  0%, 60% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--signal) 70%, transparent); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+.chart-flash {
+  animation: chart-flash 1.8s ease-out;
+}

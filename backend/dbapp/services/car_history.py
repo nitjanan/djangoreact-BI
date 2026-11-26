@@ -22,6 +22,7 @@ from dbapp.services.dashboard import (
     MA_TYPE_PM,
     CompanyAccessDenied,
     branch_ids,
+    build_jobs,
     car_age,
     doc_repair_events,
     merge_spans,
@@ -30,7 +31,7 @@ from dbapp.services.dashboard import (
     to_gregorian,
     unit_noun,
     user_companies,
-    work_source,
+    work_rows,
 )
 from dbapp.services.maintenance_stage import STAGE_LABELS
 from dbapp.services.parts import doc_job_list, part_rows
@@ -79,10 +80,9 @@ def build_car_history(user, car_id, branch_company_id, now=None):
         raise CarNotFound(car_id)
 
     car_filter = {"car_id": car_id, "branch_company_id__in": company_ids}
-    work_model, work_field = work_source(car.car_dep_id)
 
     repair = _by_month(SummaryRepair.objects.filter(**car_filter), "amount")
-    work = _by_month(work_model.objects.filter(**car_filter), work_field)
+    work = _by_month(*work_rows(car.car_dep_id, **car_filter))
     tickets_qs = SummaryMaintenance.objects.filter(**car_filter)
     breakdowns = _by_month(tickets_qs.filter(ma_type=MA_TYPE_BREAKDOWN), "id", Count)
     pms = _by_month(tickets_qs.filter(ma_type=MA_TYPE_PM), "id", Count)
@@ -207,4 +207,6 @@ def build_car_history(user, car_id, branch_company_id, now=None):
         "repair_items": repair_items,
         "tickets": tickets,
         "doc_jobs": doc_jobs,
+        # งานที่ทำจากบันทึกการใช้รถ แยกตามแผนกค่าใช้จ่าย (ทุกช่วงที่ sync มา)
+        "jobs": build_jobs(car_filter),
     }

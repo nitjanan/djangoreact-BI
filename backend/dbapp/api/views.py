@@ -217,6 +217,7 @@ class DashboardView(APIView):
             month_to=params["month_to"],
             car_dep=params["car_dep"],
             car_type=params["car_type"],
+            brand=params["brand"] or None,
             car_id=params["car_id"],
             branch_company_id=params["branch_company_id"],
         )

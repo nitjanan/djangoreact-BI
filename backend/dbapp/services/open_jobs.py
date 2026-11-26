@@ -116,6 +116,7 @@ def build_open_jobs(base_filter, now=None):
         "immobile_car_count": len(immobile_cars),
         "stale_count": sum(1 for j in jobs if j["days"] > STALE_DAYS),
         "stale_days": STALE_DAYS,
+        "po_overdue_count": sum(1 for j in jobs if j["po_overdue"]),
         "has_process": stage_counts[NO_STAGE] < len(jobs),
         "buckets": [
             {"label": label, "count": count}

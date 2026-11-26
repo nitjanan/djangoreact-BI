@@ -7,7 +7,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import type { Dashboard, Schemas } from "@/api/client";
@@ -52,6 +52,7 @@ export function HeroPanel({
   canSync,
   syncing,
   onSync,
+  summary,
 }: {
   companyName: string;
   data: Dashboard | undefined;
@@ -60,6 +61,8 @@ export function HeroPanel({
   canSync: boolean;
   syncing: boolean;
   onSync: () => void;
+  /** แถบตัวเลขสรุปของทุกคันในตัวกรอง (แสดงในแผงหัวใต้ค่าซ่อมรวม) */
+  summary?: ReactNode;
 }) {
   // ป้าย "กำลังดูเฉพาะ" ในแผงหัว: เลื่อนพ้นจอแล้วแสดงป้ายลอยด้านล่างแทน
   const [chip, setChip] = useState<HTMLDivElement | null>(null);
@@ -155,6 +158,7 @@ export function HeroPanel({
                 departments?.find((d) => d.id === params.carDep)?.name,
                 data.car_types.find((t) => t.id === data.filters.car_type)
                   ?.name ?? `ทุกประเภท${data.filters.unit_noun}`,
+                data.brands.find((b) => b.key === data.filters.brand)?.label,
                 periodLabel(year, range, wholeYear),
               ]
                 .filter(Boolean)
@@ -190,6 +194,12 @@ export function HeroPanel({
           {data && <MonthBars chart={data.charts.repair_vs_work} />}
         </div>
       </div>
+
+      {summary && (
+        <div className="relative border-t border-white/10 px-5 py-5 md:px-7">
+          {summary}
+        </div>
+      )}
 
       {/* ตัวกรอง */}
       <div className="relative flex flex-wrap items-center gap-3 border-t border-white/10 bg-black/15 px-5 py-3 md:px-7">
