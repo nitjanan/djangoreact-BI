@@ -296,7 +296,7 @@ def update_summary_from_api(request):
     """งานอัปเดตอัตโนมัติทุกวัน (Task Scheduler/cron เรียก): base + ข้อมูลสรุปย้อนหลัง 3 เดือน
 
     เรียกได้ 2 แบบ (เหมือนระบบเดิมที่เปิด URL บนเครื่อง server ได้เลย):
-    - จากเครื่อง server เอง: http://127.0.0.1:8001/update_summary_from_api/ ไม่ต้องใส่รหัส
+    - จากเครื่อง server เอง: http://127.0.0.1:8003/update_summary_from_api/ ไม่ต้องใส่รหัส
       (เฉพาะเมื่อตั้ง ALLOW_LOCAL_SYNC_WITHOUT_TOKEN=true ใน .env ค่าเริ่มต้นปิด)
     - จากเครื่องอื่น: ส่งรหัส SYNC_TOKEN ใน header X-Sync-Token เท่านั้น
       (ไม่รับใน URL เพราะจะติดไปใน log/ประวัติเบราว์เซอร์ และไม่ใช้ session login
