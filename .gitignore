@@ -24,3 +24,6 @@ Thumbs.db
 
 # log ของงานตั้งเวลา (sync_webstock)
 backend/logs/
+
+# ไฟล์ backup ฐานข้อมูล
+backups/

@@ -5,7 +5,7 @@ import { defineConfig } from 'vite'
 
 // Django dev server (ดู README) — ส่ง /api, /admin, /static ต่อไปที่ Django
 // ทำให้ React กับ API อยู่ origin เดียวกัน ไม่ต้องตั้ง CORS และใช้ session cookie ได้ตรง ๆ
-const DJANGO = process.env.DJANGO_URL ?? 'http://127.0.0.1:8001'
+const DJANGO = process.env.DJANGO_URL ?? 'http://127.0.0.1:8003'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

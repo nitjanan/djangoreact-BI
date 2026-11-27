@@ -13,14 +13,14 @@ frontend/   React 19 + TypeScript + Vite + Tailwind v4 + shadcn/ui
 เปิด MySQL ใน XAMPP ก่อน แล้วรัน 2 terminal:
 
 ```bash
-cd backend && uv run python manage.py runserver 8001
+cd backend && uv run python manage.py runserver 8003
 ```
 
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
-เปิด http://localhost:5173 — Vite ส่ง `/api`, `/admin`, `/static` ต่อไปที่ Django (8001)
+เปิด http://localhost:5173 — Vite ส่ง `/api`, `/admin`, `/static` ต่อไปที่ Django (8003)
 จึงอยู่ origin เดียวกัน ใช้ session cookie ได้โดยไม่ต้องตั้ง CORS
 
 ## Frontend
@@ -65,13 +65,13 @@ cd backend
 cp .env.example .env
 uv sync
 uv run python manage.py migrate      # ฐานเดิม: แค่สร้างตารางของ app ใหม่ (ถ้ามี)
-uv run python manage.py runserver 8001
+uv run python manage.py runserver 8003
 ```
 
-- Swagger: http://localhost:8001/api/docs/
-- Admin:   http://localhost:8001/admin/
+- Swagger: http://localhost:8003/api/docs/
+- Admin:   http://localhost:8003/admin/
 
-> ใช้พอร์ต 8001 เพราะ `MAINTENANCE_API_BASE` (webstock บนเครื่อง) ใช้ 8000 อยู่
+> ใช้พอร์ต 8003 เพราะ `MAINTENANCE_API_BASE` (webstock บนเครื่อง) ใช้ 8000 อยู่
 
 ทดสอบและ lint:
 
@@ -142,9 +142,9 @@ Windows Task Scheduler บนเครื่อง server (Create Task):
 
 - **บนเครื่อง server เอง** เปิด URL ได้โดยไม่ต้องใส่รหัส เมื่อตั้ง `ALLOW_LOCAL_SYNC_WITHOUT_TOKEN=true`
   ใน `backend/.env` แล้ว restart Django (ค่าเริ่มต้นปิด = ต้องใส่รหัสทุกเครื่อง):
-  `curl.exe -fsS http://127.0.0.1:8001/update_summary_from_api/`
+  `curl.exe -fsS http://127.0.0.1:8003/update_summary_from_api/`
 - **จากเครื่องอื่น** ต้องตั้ง `SYNC_TOKEN` ใน `backend/.env` แล้วส่งใน header `X-Sync-Token` เท่านั้น (ไม่รับใน URL):
-  `curl.exe -fsS -H "X-Sync-Token: <SYNC_TOKEN>" http://<server>:8001/update_summary_from_api/`
+  `curl.exe -fsS -H "X-Sync-Token: <SYNC_TOKEN>" http://<server>:8003/update_summary_from_api/`
 
 คำขอที่ผ่าน reverse proxy (มี header `X-Forwarded-For`/`Forwarded`) ไม่นับเป็นเครื่อง server แม้ proxy อยู่เครื่องเดียวกัน
 ถ้าเปิดเว็บผ่าน IIS/nginx ให้ตรวจว่า proxy ส่ง `X-Forwarded-For` ทุกคำขอก่อนเปิดสวิตช์ ไม่อย่างนั้นใครก็สั่งดึงข้อมูลผ่าน proxy ได้โดยไม่ต้องมีรหัส
